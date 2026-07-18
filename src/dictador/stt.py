@@ -61,6 +61,15 @@ def find_model() -> str | None:
     return _find_model()
 
 
+def server_ready() -> bool:
+    """True si el whisper-server respondía la última vez que se le necesitó.
+
+    La UI lo usa para distinguir "no dijiste nada" de "el motor está caído":
+    mensajes distintos, remedios distintos.
+    """
+    return _server_ready.is_set()
+
+
 def ensure_model(progress_cb=None) -> str | None:
     """Devuelve la ruta del modelo, descargándolo si no existe (con progreso 0-100).
 

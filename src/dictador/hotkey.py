@@ -12,6 +12,9 @@ Modos del botón de dictado:
 
 cycle_mode (Ctrl+Shift+M) y paste_last (Ctrl+Shift+V) se detectan como combos
 dentro del mismo listener.
+
+cancel (Esc) descarta el dictado en curso: la app decide si aplica (solo cuando
+está grabando o procesando), así que dispararlo en cada Esc del sistema es barato.
 """
 from __future__ import annotations
 
@@ -51,6 +54,8 @@ class HotkeyManager:
         on_stop,
         on_cycle,
         on_paste,
+        cancel_keys: list[str] | None = None,
+        on_cancel=None,
     ):
         self.toggle_mode = toggle_mode
         self.on_toggle = on_toggle
@@ -58,9 +63,12 @@ class HotkeyManager:
         self.on_stop = on_stop
         self.on_cycle = on_cycle
         self.on_paste = on_paste
+        self.on_cancel = on_cancel
 
         # tecla de dictado (modo hold: una sola tecla)
         self._toggle_key = toggle_keys[0].lower() if toggle_keys else None
+        # tecla de cancelar (una sola, Esc por defecto)
+        self._cancel_key = cancel_keys[0].lower() if cancel_keys else None
         self._held = False
         # combos (cycle/paste) y también el toggle si modo "toggle" con combo
         self._cycle_combo = _combo_names(cycle_keys) if cycle_keys else None
@@ -89,7 +97,12 @@ class HotkeyManager:
             return
 
         if already:
-            return  # autorepeat: no re-disparar combos
+            return  # autorepeat: no re-disparar combos ni el cancel
+
+        # --- cancelar dictado (Esc) ---
+        if self.on_cancel and name == self._cancel_key:
+            threading.Thread(target=self.on_cancel, daemon=True).start()
+            return
 
         # --- combos (incluye toggle en modo toggle si es combo) ---
         if self._toggle_combo and snapshot == self._toggle_combo:

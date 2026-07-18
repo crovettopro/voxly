@@ -87,7 +87,7 @@ class OnboardingController(NSObject):
 
         self._hint = _label(
             NSMakeRect(24, 26, W - 190, 34),
-            "You're ready — hold the right ⌘ key, speak, and let go.", 12)
+            "You're ready — hold the right ⌘ key, speak, and let go. Esc cancels.", 12)
         self._hint.setHidden_(True)
         content.addSubview_(self._hint)
 

@@ -46,9 +46,11 @@ Si el paste no funciona, suele ser Accesibilidad/Automatización sin conceder.
 
 Aparece 🎙 en la barra de menús.
 
-- **F5** → empezar/parar dictado (configúralo en `config.yaml > hotkeys.toggle`).
+- **⌘ derecha (mantener)** → push-to-talk: habla mientras la mantienes, suelta
+  para terminar (tecla y modo en `config.yaml > hotkeys`).
 - Habla. El overlay muestra la transcripción en vivo.
-- Te callas ~1.2s → se cierra solo, refina y pega.
+- Sueltas la tecla → transcribe, refina y pega solo.
+- **Esc** → cancela el dictado en curso (grabando o procesando): no se pega nada.
 - **Ctrl+Shift+M** → cambia de modo.
 - **Ctrl+Shift+V** → vuelve a pegar el último resultado.
 

@@ -65,6 +65,8 @@ class DictadorApp(rumps.App):
         self.stt_lang = resolve_language(cfg.get("stt.language", None))
         self._state = "IDLE"
         self._lock = threading.Lock()
+        # Esc durante grabación/procesado: descartar el dictado sin pegar nada.
+        self._cancel = threading.Event()
         self._recorder: audio.Recorder | None = None
         self._overlay = Overlay(cfg.get("app.overlay_position", "bottom-right"))
         self._last_result = ""
@@ -101,6 +103,8 @@ class DictadorApp(rumps.App):
             on_stop=self.stop_record,
             on_cycle=self.cycle_mode,
             on_paste=self.paste_last,
+            cancel_keys=cfg.get("hotkeys.cancel", ["esc"]),
+            on_cancel=self.cancel_record,
         )
 
     @staticmethod
@@ -239,7 +243,26 @@ class DictadorApp(rumps.App):
         except Exception:
             log.exception("Error en stop_record")
 
+    def cancel_record(self):
+        """Esc: descarta el dictado en curso (grabando o procesando). No pega nada.
+
+        Se dispara con CADA Esc del sistema, así que el no-op cuando está IDLE
+        tiene que ser inmediato y sin efectos.
+        """
+        with self._lock:
+            state = self._state
+            if state == "IDLE":
+                return
+            self._cancel.set()
+        log.info("Dictado cancelado por el usuario (estado %s).", state)
+        if state == "RECORDING":
+            try:
+                self._stop_record(force=True)  # dispara _on_stop, que verá _cancel
+            except Exception:
+                log.exception("Error cancelando la grabación")
+
     def _start_record(self, auto_stop: bool = True):
+        self._cancel.clear()
         with self._lock:
             self._state = "RECORDING"
         self._refresh_title()
@@ -300,15 +323,18 @@ class DictadorApp(rumps.App):
         return modes.MODES.get(self.mode, {}).get("stt_lang") or self.stt_lang
 
     def _on_stop(self, audio_buf, duration: float):
-        self._play_sound("Tink")    # "recibido, procesando"
         self._partial_running.clear()
+        if self._cancel.is_set():
+            threading.Thread(target=self._finish_cancel, daemon=True).start()
+            return
+        self._play_sound("Tink")    # "recibido, procesando"
         rec = self._recorder
         had_speech = rec.had_speech if rec else False
         speech_ratio = rec.speech_ratio if rec else 0.0
         with self._lock:
             self._state = "PROCESSING"
         self._refresh_title()
-        self._overlay.update("Processing…")
+        self._overlay.update("Transcribing…")
         threading.Thread(
             target=self._process,
             args=(audio_buf, duration, had_speech, speech_ratio),
@@ -322,6 +348,12 @@ class DictadorApp(rumps.App):
             time.sleep(secs)
         except Exception:
             pass
+
+    def _finish_cancel(self):
+        """Cierre visual de un dictado cancelado con Esc."""
+        self._play_sound("Basso")
+        self._flash("(canceled — nothing pasted)", 0.9)
+        self._reset_idle()
 
     def _process(self, audio_buf, duration, had_speech: bool = True, speech_ratio: float = 0.0):
         t0 = time.monotonic()
@@ -355,13 +387,27 @@ class DictadorApp(rumps.App):
                 "Transcripción (%.1fs, RMS=%.0f, voz=%.0f%%): %s",
                 duration, level, speech_ratio * 100, transcript,
             )
+            if self._cancel.is_set():
+                log.info("Cancelado tras la transcripción; nada pegado.")
+                self._flash("(canceled — nothing pasted)", 0.9)
+                return
             if not transcript:
-                self._flash("(no speech detected)", 1.2)
+                # Distinguir "no dijiste nada" de "el motor STT está caído":
+                # con voz detectada por el VAD y el server sin responder, el
+                # problema es del motor y reintentar en unos segundos funciona.
+                if had_speech and not stt.server_ready():
+                    log.warning("STT sin transcripción con voz detectada: server caído.")
+                    self._flash("⚠️ Speech engine restarting — try again in a moment", 2.2)
+                else:
+                    self._flash("(no speech detected)", 1.2)
                 return
             if stt.looks_hallucinated(transcript, speech_ratio):
                 log.warning("Descartada como alucinación de Whisper: %r", transcript)
                 self._flash("(didn't catch that — say it again)", 1.5)
                 return
+            # Enseñar ya lo transcrito: la espera del refino (2-6s) se entiende
+            # mejor viendo el texto que con un "Processing…" opaco.
+            self._overlay.update(f"✨ {transcript}")
             # 2) refino por modo (si falla, cae a la transcripción cruda: nunca bloquea)
             # Fast-lane: dictados cortos en modos marcados se pegan tal cual —
             # Whisper ya puntúa bien frases breves y ahorramos 2-6s de LLM.
@@ -381,16 +427,30 @@ class DictadorApp(rumps.App):
                     log.exception("Refinado falló; uso transcripción cruda")
                     final = transcript
             final = final or transcript
+            if self._cancel.is_set():
+                log.info("Cancelado durante el refino; nada pegado.")
+                self._flash("(canceled — nothing pasted)", 0.9)
+                return
             self._last_result = final
             self._push_history(final)
             log.info("Final (+%.1fs): %s", time.monotonic() - t0, final)
             # 3) entregar
             auto_paste = bool(self.cfg.get("output.auto_paste", True))
             copy = bool(self.cfg.get("output.copy_to_clipboard", True))
-            output.deliver(final, auto_paste=auto_paste, copy=copy)
-            # mostrar resultado breve y cerrar
-            self._overlay.update(final)
-            time.sleep(1.6)
+            status = output.deliver(final, auto_paste=auto_paste, copy=copy)
+            if auto_paste and status == "copied":
+                # El pegado falló pero el texto SÍ está en el portapapeles:
+                # sin este aviso el usuario ve que "no pasa nada" y lo pierde.
+                rumps.notification(
+                    "Voxly",
+                    "Couldn't paste into the active app",
+                    "Your text is on the clipboard — press ⌘V to paste it.",
+                )
+                self._flash("Copied — press ⌘V to paste", 2.2)
+            else:
+                # mostrar resultado breve y cerrar
+                self._overlay.update(final)
+                time.sleep(1.6)
         except Exception:
             log.exception("Error procesando dictado")
         finally:

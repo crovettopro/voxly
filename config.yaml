@@ -49,6 +49,9 @@ hotkeys:
   cycle_mode: ["ctrl","shift","m"]
   # Pegar manualmente el último resultado (si auto_paste está apagado)
   paste_last: ["ctrl","shift","v"]
+  # Cancelar el dictado en curso (grabando o procesando): descarta todo,
+  # no se pega nada. UNA tecla.
+  cancel: ["esc"]
 
 # --- Output ---
 output:

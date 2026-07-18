@@ -53,14 +53,25 @@ def paste_frontmost() -> bool:
         return False
 
 
-def deliver(text: str, auto_paste: bool, copy: bool) -> None:
+def deliver(text: str, auto_paste: bool, copy: bool) -> str:
+    """Entrega el texto y devuelve cómo quedó, para que la UI pueda avisar:
+
+    - "pasted": pegado en la app activa (lo normal).
+    - "copied": no se pegó, pero está en el portapapeles (⌘V manual).
+    - "failed": ni pegado ni copiado.
+    """
     if not text:
-        return
+        return "failed"
     if copy:
         copy_to_clipboard(text)
     if auto_paste:
         # pequeño delay para que el portapapeles se asiente
         time.sleep(0.08)
         ok = paste_frontmost()
-        if not ok and copy:
+        if ok:
+            return "pasted"
+        if copy:
             log.info("Texto dejado en portapapeles (pega manual Cmd+V).")
+            return "copied"
+        return "failed"
+    return "copied" if copy else "failed"
