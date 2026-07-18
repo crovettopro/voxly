@@ -1,0 +1,68 @@
+# Configuración de Dictador. Cárgala con config.load_config().
+# Los valores de entorno (.env) tienen prioridad sobre lo de aquí.
+
+# --- STT (speech to text) — whisper.cpp ---
+stt:
+  # whisper.cpp usa un modelo ggml .bin. Se busca automáticamente en
+  # ~/.dictador/models/ggml-large-v3-turbo.bin (o -large-v3 / -medium).
+  # Sobreescribe con la ruta que quieras vía env DICTADOR_STT_MODEL_FILE.
+  model: "ggml-large-v3-turbo"
+  server_port: 8080       # puerto del whisper-server local
+  threads: 4              # hilos CPU para el decoder
+  language: null          # null = auto-detectar. "es" o "en" para forzar.
+  sample_rate: 16000      # Whisper quiere 16kHz mono
+  partial_interval: 1.5   # segundos entre transcripciones del buffer (overlay en vivo)
+  partial_window: 12.0    # segundos de audio recientes usados para el partial
+
+# --- Audio / VAD ---
+audio:
+  device: null            # null = dispositivo por defecto. Índice int o nombre.
+  vad_aggressiveness: 2   # 0-3 (webrtcvad). 2 = buen balance.
+  silence_to_stop: 1.2    # segundos de silencio para auto-cerrar la grabación
+  max_duration: 60        # seguridad: cierra a los 60s aunque no haya silencio
+  min_duration: 0.4       # descarta pulsaciones de menos de 0.4s
+
+# --- Hotkeys (pynput key strings) ---
+hotkeys:
+  # Toggle grabación. Combo como lista de teclas. Ej: ["cmd_r"], ["ctrl","space"], ["f5"]
+  toggle: ["f5"]
+  # Cambiar al modo siguiente
+  cycle_mode: ["ctrl","shift","m"]
+  # Pegar manualmente el último resultado (si auto_paste está apagado)
+  paste_last: ["ctrl","shift","v"]
+
+# --- Output ---
+output:
+  auto_paste: true        # true = simular Cmd+V en la app activa; false = solo portapapeles
+  copy_to_clipboard: true
+
+# --- Refinamiento LLM ---
+llm:
+  # Backend: "ollama" | "claude" | "openai"
+  backend: "ollama"
+  # Ollama
+  ollama:
+    host: "http://localhost:11434"
+    model: "glm-5.2:cloud"
+    temperature: 0.3
+    timeout: 60
+  # Claude API (si ANTHROPIC_API_KEY está en env)
+  claude:
+    model: "claude-sonnet-5"
+    max_tokens: 1200
+    timeout: 60
+  # OpenAI-compatible (base_url + key)
+  openai:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-mini"
+    api_key_env: "OPENAI_API_KEY"
+    temperature: 0.3
+    timeout: 60
+
+# --- App ---
+app:
+  default_mode: "ordenar"
+  language: "es"          # idioma de salida del refinador
+  show_overlay: true      # HUD con transcripción en vivo
+  overlay_position: "bottom-right"   # "bottom-right" | "top-right" | "center"
+  log_level: "INFO"

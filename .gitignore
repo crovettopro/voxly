@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# STT models cache (mlx-whisper descarga en ~/Library/Caches/huggingface)
+.cache/
+models/
+
+# macOS
+.DS_Store
