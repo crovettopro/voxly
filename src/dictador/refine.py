@@ -19,11 +19,49 @@ from . import modes
 
 log = logging.getLogger("dictador.refine")
 
+# Resultado cacheado de la auto-detección (backend "auto"). Se refresca con
+# detect_backend(force=True) — el menú "AI engine" y el keepalive lo hacen.
+_detected: str | None = None
+
+
+def detect_backend(cfg=None, force: bool = False) -> str:
+    """Cascada de auto-detección del motor LLM disponible.
+
+    ollama corriendo → claude (ANTHROPIC_API_KEY) → openai (key) → "none".
+    Con "none" Voxly pega la transcripción cruda: funciona sin IA instalada.
+    """
+    global _detected
+    if _detected is not None and not force:
+        return _detected
+    if cfg is None:
+        from .config import get_config
+
+        cfg = get_config()
+    try:
+        r = requests.get(
+            f"{cfg.get('llm.ollama.host', 'http://localhost:11434')}/api/tags",
+            timeout=1.5,
+        )
+        if r.ok:
+            _detected = "ollama"
+            return _detected
+    except Exception:
+        pass
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        _detected = "claude"
+        return _detected
+    if os.environ.get(cfg.get("llm.openai.api_key_env", "OPENAI_API_KEY")):
+        _detected = "openai"
+        return _detected
+    _detected = "none"
+    log.info("Sin motor LLM detectado: los dictados se pegan sin refinar.")
+    return _detected
+
 
 class Refiner:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.backend = cfg.get("llm.backend", "ollama")
+        self.backend = cfg.get("llm.backend", "auto")
 
     def refine(self, transcript: str, mode: str, language: str | None) -> str:
         transcript = (transcript or "").strip()
@@ -33,9 +71,14 @@ class Refiner:
         if not sys_prompt:  # modo literal
             return transcript
 
-        if self.backend == "claude" and os.environ.get("ANTHROPIC_API_KEY"):
+        backend = self.backend
+        if backend == "auto":
+            backend = detect_backend(self.cfg)
+        if backend == "none":
+            return transcript
+        if backend == "claude" and os.environ.get("ANTHROPIC_API_KEY"):
             return self._claude(sys_prompt, transcript)
-        if self.backend == "openai":
+        if backend == "openai":
             return self._openai(sys_prompt, transcript)
         # default + fallback
         return self._ollama(sys_prompt, transcript)
@@ -56,6 +99,10 @@ class Refiner:
                         {"role": "user", "content": user},
                     ],
                     "stream": False,
+                    # los modelos razonadores (GLM, qwen, deepseek) queman 200-4700
+                    # tokens "pensando" antes de responder: 1.6-40s de latencia extra
+                    # que no aporta nada para limpiar un dictado
+                    "think": False,
                     "options": {"temperature": temp},
                 },
                 timeout=timeout,

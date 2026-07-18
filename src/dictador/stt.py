@@ -33,7 +33,11 @@ _server_ready = threading.Event()
 
 
 def _find_model() -> str | None:
+    # q5_0 primero: en Macs de 8GB el modelo sin cuantizar (1.5GB) se pagina
+    # tras inactividad y el siguiente dictado paga 10-19s; el cuantizado (~550MB)
+    # cabe holgado en RAM con calidad casi idéntica.
     candidates = [
+        os.path.expanduser("~/.dictador/models/ggml-large-v3-turbo-q5_0.bin"),
         os.path.expanduser("~/.dictador/models/ggml-large-v3-turbo.bin"),
         os.path.expanduser("~/.dictador/models/ggml-large-v3.bin"),
         os.path.expanduser("~/.dictador/models/ggml-medium.bin"),
@@ -47,7 +51,72 @@ def _find_model() -> str | None:
     return None
 
 
+MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin"
+
+
+def find_model() -> str | None:
+    return _find_model()
+
+
+def ensure_model(progress_cb=None) -> str | None:
+    """Devuelve la ruta del modelo, descargándolo si no existe (con progreso 0-100)."""
+    m = _find_model()
+    if m:
+        return m
+    dst = pathlib.Path(os.path.expanduser("~/.dictador/models/ggml-large-v3-turbo-q5_0.bin"))
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".part")
+    log.info("Descargando modelo: %s", MODEL_URL)
+    try:
+        with requests.get(MODEL_URL, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0)) or None
+            done, last_pct = 0, -1
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 20):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if total and progress_cb:
+                        pct = int(done * 100 / total)
+                        if pct != last_pct:
+                            last_pct = pct
+                            try:
+                                progress_cb(pct)
+                            except Exception:
+                                pass
+        tmp.rename(dst)
+        log.info("Modelo descargado (%.2f GB).", done / 1e9)
+        return str(dst)
+    except Exception as e:
+        log.error("Descarga de modelo falló: %s", e)
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+        return None
+
+
 def _which_server() -> str | None:
+    # 1º el whisper-server EMBEBIDO en el .app (vendor/whisper en el spec):
+    # el receptor no necesita Homebrew.
+    import sys
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = os.path.join(meipass, "whisper", "whisper-server")
+        if os.path.exists(bundled) and os.access(bundled, os.X_OK):
+            return bundled
+    # Las apps lanzadas por LaunchServices NO heredan el PATH del shell
+    # (/opt/homebrew/bin no está) — sin las rutas explícitas, el .app no
+    # encontraría whisper-server tras un reinicio del Mac.
+    explicit = [
+        os.path.expanduser("~/.dictador/bin/whisper-server"),
+        "/opt/homebrew/bin/whisper-server",
+        "/usr/local/bin/whisper-server",
+    ]
+    for p in explicit:
+        if os.path.exists(p) and os.access(p, os.X_OK):
+            return p
     return shutil.which("whisper-server") or shutil.which("whisper-cli")
 
 
@@ -84,12 +153,22 @@ def start_server(model_path: str | None = None, threads: int = 4, port: int = 80
             "-l", "auto",  # auto-detección de idioma
         ]
         log.info("Arrancando whisper-server: %s", " ".join(cmd))
+        env = os.environ.copy()
+        # server embebido: ggml busca sus backends (Metal/CPU .so) en una ruta
+        # compilada de Homebrew que no existe en otros Macs — GGML_BACKEND_PATH
+        # los redirige al directorio vendorizado si están colocados ahí.
+        server_dir = os.path.dirname(server_bin)
+        if any(f.startswith("libggml-") and f.endswith(".so")
+               for f in os.listdir(server_dir) if os.path.isfile(os.path.join(server_dir, f))):
+            env["GGML_BACKEND_PATH"] = server_dir
+            log.info("GGML_BACKEND_PATH=%s (backends embebidos)", server_dir)
         try:
             _server_proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
+                env=env,
             )
         except Exception as e:
             log.exception("No pude arrancar whisper-server: %s", e)
@@ -164,8 +243,13 @@ def transcribe(
     audio: np.ndarray,
     model_id: str | None = None,
     language: str | None = None,
+    prompt: str | None = None,
 ) -> str:
-    """Transcribe un array int16 16kHz pidiéndolo al whisper-server. Devuelve texto."""
+    """Transcribe un array int16 16kHz pidiéndolo al whisper-server. Devuelve texto.
+
+    `prompt` = diccionario personal (nombres propios, jerga): whisper lo usa como
+    initial prompt y sesga la transcripción hacia esas grafías.
+    """
     if audio is None or len(audio) == 0:
         return ""
     if not (_server_ready.is_set() or start_server()):
@@ -178,6 +262,8 @@ def transcribe(
         data = {"temperature": "0.0", "response_format": "json"}
         if language and language != "auto":
             data["language"] = language
+        if prompt:
+            data["prompt"] = prompt
         with open(wav_path, "rb") as f:
             files = {"file": ("audio.wav", f, "audio/wav")}
             try:
@@ -207,6 +293,39 @@ def transcribe(
             os.unlink(wav_path)
         except Exception:
             pass
+
+
+# Frases que Whisper "inventa" cuando el audio es silencio o casi silencio
+# (entrenado con vídeos: cierres tipo "Thank you." o créditos de subtituladores).
+_HALLUCINATIONS = {
+    "thank you", "thank you very much", "thanks for watching", "thank you for watching",
+    "you",
+    "gracias", "muchas gracias", "gracias por ver", "gracias por ver el video",
+    "subtitulos realizados por la comunidad de amara org",
+    "subtitulos por la comunidad de amara org",
+    "subtitles by the amara org community",
+}
+
+
+def _norm_text(text: str) -> str:
+    import re
+    import unicodedata
+
+    t = unicodedata.normalize("NFD", text.lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")  # sin tildes
+    return re.sub(r"[\W_]+", " ", t).strip()
+
+
+def looks_hallucinated(text: str, speech_ratio: float) -> bool:
+    """True si la transcripción huele a alucinación de Whisper sobre silencio.
+
+    Solo descartamos frases de la blacklist cuando el VAD apenas vio voz
+    (speech_ratio bajo): si el usuario dictó de verdad "gracias", se respeta.
+    """
+    norm = _norm_text(text)
+    if not norm:
+        return True
+    return norm in _HALLUCINATIONS and speech_ratio < 0.15
 
 
 def warmup(model_id: str | None = None) -> None:

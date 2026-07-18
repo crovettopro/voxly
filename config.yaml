@@ -4,15 +4,24 @@
 # --- STT (speech to text) — whisper.cpp ---
 stt:
   # whisper.cpp usa un modelo ggml .bin. Se busca automáticamente en
-  # ~/.dictador/models/ggml-large-v3-turbo.bin (o -large-v3 / -medium).
+  # ~/.dictador/models/ggml-large-v3-turbo-q5_0.bin (o -turbo / -large-v3 / -medium).
+  # El q5_0 cuantizado (~550MB) es el recomendado: en Macs de 8GB no se pagina.
   # Sobreescribe con la ruta que quieras vía env DICTADOR_STT_MODEL_FILE.
   model: "ggml-large-v3-turbo"
+  # Diccionario personal: nombres propios, marcas y jerga que Whisper suele
+  # escribir mal. Se pasan como "initial prompt" y sesgan la transcripción
+  # hacia estas grafías exactas. Añade los tuyos.
+  dictionary: ["Voxly", "Ucademy", "Eduardo Crovetto"]
   server_port: 8080       # puerto del whisper-server local
   threads: 4              # hilos CPU para el decoder
-  language: null          # null = auto-detectar. "es" o "en" para forzar.
+  language: "es"          # forzar idioma ahorra ~1.4s/petición vs auto-detección.
+                          # El modo Traducir EN→ES fuerza "en" por su cuenta.
   sample_rate: 16000      # Whisper quiere 16kHz mono
-  partial_interval: 1.5   # segundos entre transcripciones del buffer (overlay en vivo)
-  partial_window: 12.0    # segundos de audio recientes usados para el partial
+  partial_interval: 2.0   # segundos entre transcripciones del buffer (overlay en vivo)
+  partial_window: 5.0     # ventana corta = parciales rápidos que no encolan la final
+                          # (el whisper-server procesa en serie)
+  keepalive_min: 4        # ping cada N min para mantener el modelo en RAM y evitar
+                          # el arranque frío de 10-19s tras inactividad (0 = off)
 
 # --- Audio / VAD ---
 audio:
@@ -21,6 +30,8 @@ audio:
   silence_to_stop: 1.2    # segundos de silencio para auto-cerrar la grabación
   max_duration: 60        # seguridad: cierra a los 60s aunque no haya silencio
   min_duration: 0.4       # descarta pulsaciones de menos de 0.4s
+  min_rms: 50             # RMS int16 mínimo: por debajo = micro sin señal (TCC
+                          # denegado o mute) y se descarta sin llamar a Whisper
 
 # --- Hotkeys (pynput key strings) ---
 hotkeys:
@@ -43,14 +54,21 @@ output:
 
 # --- Refinamiento LLM ---
 llm:
-  # Backend: "ollama" | "claude" | "openai"
-  backend: "ollama"
+  # Backend: "auto" | "ollama" | "claude" | "openai" | "none"
+  # "auto" detecta en cascada: Ollama corriendo → ANTHROPIC_API_KEY →
+  # OPENAI_API_KEY → none (pegar transcripción cruda, sin IA). Así cada
+  # usuario conecta la IA que tenga sin tocar nada.
+  backend: "auto"
+  # Fast-lane: dictados de ≤N palabras en modos con fast_lane (Organize) se
+  # pegan tal cual sin pasar por el LLM — Whisper ya puntúa bien frases cortas
+  # y se ahorran 2-6s. 0 = desactivado.
+  fast_lane_words: 9
   # Ollama
   ollama:
     host: "http://localhost:11434"
     model: "glm-5.2:cloud"
     temperature: 0.3
-    timeout: 60
+    timeout: 20             # si el LLM no responde a tiempo se pega la transcripción cruda
   # Claude API (si ANTHROPIC_API_KEY está en env)
   claude:
     model: "claude-sonnet-5"
@@ -70,4 +88,5 @@ app:
   language: "es"          # idioma de salida del refinador
   show_overlay: true      # HUD con transcripción en vivo
   overlay_position: "bottom-right"   # "bottom-right" | "top-right" | "center"
+  sounds: true            # clic sutil al empezar/terminar de grabar (menú: Settings → Sounds)
   log_level: "INFO"

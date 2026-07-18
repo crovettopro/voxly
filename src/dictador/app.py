@@ -8,7 +8,11 @@ Al finalizar: STT final -> refino por modo -> entregar (clipboard + paste).
 """
 from __future__ import annotations
 
+import collections
+import json
 import logging
+import os
+import plistlib
 import threading
 import time
 
@@ -20,6 +24,33 @@ from .hotkey import HotkeyManager
 from .overlay import Overlay
 
 log = logging.getLogger("dictador")
+
+# Preferencias que se tocan desde el menú (el config.yaml va DENTRO del .app y
+# es de solo lectura en la práctica): un json pequeño en ~/.dictador.
+PREFS_PATH = os.path.expanduser("~/.dictador/prefs.json")
+# "Start at login": un LaunchAgent clásico — sin APIs de ServiceManagement,
+# funciona igual lanzado desde el repo o desde /Applications.
+LAUNCH_AGENT = os.path.expanduser(
+    "~/Library/LaunchAgents/com.eduardocrovetto.dictador.plist"
+)
+HISTORY_SIZE = 10
+
+
+def _load_prefs() -> dict:
+    try:
+        with open(PREFS_PATH) as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _save_prefs(prefs: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(PREFS_PATH), exist_ok=True)
+        with open(PREFS_PATH, "w") as f:
+            json.dump(prefs, f, indent=2)
+    except Exception:
+        log.warning("No pude guardar prefs en %s", PREFS_PATH)
 
 
 class DictadorApp(rumps.App):
@@ -38,13 +69,24 @@ class DictadorApp(rumps.App):
         self._show_overlay = bool(cfg.get("app.show_overlay", True))
         self._partial_thread: threading.Thread | None = None
         self._partial_running = threading.Event()
+        self._prefs = _load_prefs()
+        self._sounds = bool(self._prefs.get("sounds", cfg.get("app.sounds", True)))
+        self._snd_cache: dict = {}   # NSSound vivos mientras suenan (si no, dealloc a mitad)
+        self._history: collections.deque[str] = collections.deque(maxlen=HISTORY_SIZE)
+        # Diccionario personal → initial prompt de Whisper (sesga hacia esas grafías).
+        # Whisper solo usa los últimos ~224 tokens del prompt: se recorta por si acaso.
+        terms = cfg.get("stt.dictionary", []) or []
+        self.stt_prompt = ", ".join(str(t).strip() for t in terms if str(t).strip())[:600] or None
 
+        icon_path = self._menubar_icon_path()
+        self._has_icon = icon_path is not None
         super().__init__(
-            name="Dictador",
-            icon=None,
-            title="🎙",  # se actualiza con el modo
+            name="Voxly",
+            icon=icon_path,          # glyph template (se adapta a claro/oscuro)
+            title=None if self._has_icon else "🎙",
             template=True,
-        )
+            quit_button=None,        # rumps añade un "Quit" propio si no se anula
+        )                            # (usamos el nuestro, que apaga server/hotkey)
         self._build_menu()
         self._toggle_mode = cfg.get("hotkeys.toggle_mode", "toggle")
         self._hotkey = HotkeyManager(
@@ -59,6 +101,22 @@ class DictadorApp(rumps.App):
             on_paste=self.paste_last,
         )
 
+    @staticmethod
+    def _menubar_icon_path() -> str | None:
+        import os
+        import sys
+
+        cands = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            cands.append(os.path.join(meipass, "assets", "menubar.png"))
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        cands.append(os.path.join(repo, "assets", "menubar.png"))
+        for c in cands:
+            if os.path.exists(c):
+                return c
+        return None
+
     # ---------- menú ----------
     def _build_menu(self):
         items = []
@@ -68,17 +126,41 @@ class DictadorApp(rumps.App):
             items.append(mi)
         self.mode_items = {key: mi for (key, _), mi in zip(modes.modes_by_key().items(), items)}
 
-        self.status = rumps.MenuItem("Listo", callback=None)
-        self.test = rumps.MenuItem("Probar dictado (3s)", callback=self.test_dictation)
-        self.health = rumps.MenuItem("Estado backends…", callback=self.show_health)
-        self.quit = rumps.MenuItem("Salir", callback=self._quit)
+        self.status = rumps.MenuItem("Ready", callback=None)
+        self.ai = rumps.MenuItem("AI: detecting…", callback=self._redetect_ai)
+        self.health = rumps.MenuItem("Backend status…", callback=self.show_health)
+        self.quit = rumps.MenuItem("Quit Voxly", callback=self._quit)
+
+        # Recent: los últimos dictados, clic = volver a copiarlos al portapapeles.
+        # Los items se PRE-crean ocultos: añadir/quitar items de un NSMenu desde el
+        # hilo de proceso sería inseguro; cambiar título/hidden funciona bien.
+        self.recent_parent = rumps.MenuItem("Recent")
+        self._recent_empty = rumps.MenuItem("(empty)")
+        self.recent_parent.add(self._recent_empty)
+        self._recent_items: list[rumps.MenuItem] = []
+        for i in range(HISTORY_SIZE):
+            mi = rumps.MenuItem(f"recent-{i}", callback=self._make_recent_cb(i))
+            self.recent_parent.add(mi)
+            mi._menuitem.setHidden_(True)
+            self._recent_items.append(mi)
+
+        settings = rumps.MenuItem("Settings")
+        self.login_item = rumps.MenuItem("Start at login", callback=self._toggle_login)
+        self.login_item.state = 1 if os.path.exists(LAUNCH_AGENT) else 0
+        self.sounds_item = rumps.MenuItem("Sounds", callback=self._toggle_sounds)
+        self.sounds_item.state = 1 if self._sounds else 0
+        settings.add(self.login_item)
+        settings.add(self.sounds_item)
 
         self.menu = [
             *items,
             rumps.separator,
+            self.recent_parent,
+            rumps.separator,
             self.status,
-            self.test,
+            self.ai,
             self.health,
+            settings,
             rumps.separator,
             self.quit,
         ]
@@ -107,16 +189,21 @@ class DictadorApp(rumps.App):
         self.set_mode(keys[(i + 1) % len(keys)])
 
     def _refresh_title(self):
-        label = modes.MODES.get(self.mode, {}).get("label", "Dictador")
-        self.title = f"🎙 {label}"
-        self.status.title = f"Modo: {label} · {self._state}"
+        label = modes.MODES.get(self.mode, {}).get("label", "Voxly")
+        state = self._state
+        # barra de menú minimalista: glyph solo en reposo, emoji de estado activo
+        self.title = {"RECORDING": "🔴", "PROCESSING": "⏳"}.get(
+            state, None if self._has_icon else "🎙"
+        )
+        state_en = {"IDLE": "ready", "RECORDING": "recording", "PROCESSING": "processing"}
+        self.status.title = f"Mode: {label} · {state_en.get(state, state)}"
 
     # ---------- grabación ----------
     def toggle_record(self):
         with self._lock:
             state = self._state
         if state == "IDLE":
-            self._start_record()
+            self._start_record(auto_stop=True)
         elif state == "RECORDING":
             self._stop_record(force=True)
 
@@ -126,7 +213,7 @@ class DictadorApp(rumps.App):
             if self._state != "IDLE":
                 return
         try:
-            self._start_record()
+            self._start_record(auto_stop=False)
         except Exception:
             log.exception("Error en start_record (se resetea a IDLE)")
             with self._lock:
@@ -143,14 +230,15 @@ class DictadorApp(rumps.App):
         except Exception:
             log.exception("Error en stop_record")
 
-    def _start_record(self):
+    def _start_record(self, auto_stop: bool = True):
         with self._lock:
             self._state = "RECORDING"
         self._refresh_title()
-        # En modo hold, el usuario controla el fin con la tecla: desactivamos el
-        # auto-stop por silencio (valor muy alto) para que no cierre al pausar a pensar.
+        # Push-to-talk (auto_stop=False): el usuario controla el fin con la tecla,
+        # desactivamos el auto-stop por silencio para que no cierre al pausar a pensar.
+        # Menú/toggle (auto_stop=True): la grabación se cierra sola tras el silencio.
         silence = self.cfg.get("audio.silence_to_stop", 1.2)
-        if self._toggle_mode == "hold":
+        if not auto_stop:
             silence = 9999.0
         acfg = audio.AudioConfig(
             device=self.cfg.get("audio.device"),
@@ -161,12 +249,13 @@ class DictadorApp(rumps.App):
         )
         self._recorder = audio.Recorder(acfg)
         if self._show_overlay:
-            self._overlay.show("Escuchando… habla ahora.")
+            self._overlay.show("Listening — speak now.")
         # hilo de partials: re-transcribe la ventana reciente
         self._partial_running.set()
         self._partial_thread = threading.Thread(target=self._partial_loop, daemon=True)
         self._partial_thread.start()
         self._recorder.start(on_stop=self._on_stop)
+        self._play_sound("Pop")     # "te escucho"
         log.info("Grabando…")
 
     def _stop_record(self, force: bool):
@@ -184,45 +273,108 @@ class DictadorApp(rumps.App):
                 break
             try:
                 a = self._recorder.get_recent_audio()
-                if len(a) / audio.SR < 0.4:
+                # sin señal suficiente no se transcribe: Whisper alucina con silencio
+                if len(a) / audio.SR < 0.4 or audio.rms_of(a) < self._min_rms():
                     continue
-                text = stt.transcribe(a, self.stt_model, self.stt_lang)
+                text = stt.transcribe(a, self.stt_model, self._stt_language(), self.stt_prompt)
                 if text and self._partial_running.is_set():
                     self._overlay.update(text)
             except Exception as e:
                 log.debug("partial error: %s", e)
 
+    def _min_rms(self) -> float:
+        return float(self.cfg.get("audio.min_rms", 50))
+
+    def _stt_language(self) -> str | None:
+        """Idioma efectivo para el STT: el modo puede forzar el suyo
+        (p.ej. Traducir EN→ES dicta en inglés)."""
+        return modes.MODES.get(self.mode, {}).get("stt_lang") or self.stt_lang
+
     def _on_stop(self, audio_buf, duration: float):
+        self._play_sound("Tink")    # "recibido, procesando"
         self._partial_running.clear()
+        rec = self._recorder
+        had_speech = rec.had_speech if rec else False
+        speech_ratio = rec.speech_ratio if rec else 0.0
         with self._lock:
             self._state = "PROCESSING"
         self._refresh_title()
-        self._overlay.update("Procesando…")
+        self._overlay.update("Processing…")
         threading.Thread(
-            target=self._process, args=(audio_buf, duration), daemon=True
+            target=self._process,
+            args=(audio_buf, duration, had_speech, speech_ratio),
+            daemon=True,
         ).start()
 
-    def _process(self, audio_buf, duration):
+    def _flash(self, msg: str, secs: float = 1.6):
+        """Mensaje breve en el HUD (el finally de _process lo cierra después)."""
+        try:
+            self._overlay.update(msg)
+            time.sleep(secs)
+        except Exception:
+            pass
+
+    def _process(self, audio_buf, duration, had_speech: bool = True, speech_ratio: float = 0.0):
+        t0 = time.monotonic()
         try:
             if audio_buf is None or len(audio_buf) == 0:
                 log.info("Grabación descartada (muy corta).")
-                self._reset_idle()
+                self._flash("(too short)", 1.0)
+                return
+            # 0) guardas: nunca mandar silencio a Whisper (alucina "Gracias"/"Thank you")
+            level = audio.rms_of(audio_buf)
+            if level < self._min_rms():
+                log.warning(
+                    "Micrófono sin señal (RMS=%.0f). ¿Permiso de Micrófono concedido?", level
+                )
+                self._flash("🎤 No audio captured — check Microphone permission", 2.5)
+                rumps.notification(
+                    "Voxly",
+                    "Microphone is silent",
+                    "System Settings → Privacy & Security → Microphone → enable Voxly.",
+                )
+                return
+            if not had_speech:
+                log.info("Sin voz detectada por VAD (RMS=%.0f).", level)
+                self._flash("(no speech detected)", 1.2)
                 return
             # 1) transcripción final
-            transcript = stt.transcribe(audio_buf, self.stt_model, self.stt_lang)
-            log.info("Transcripción: %s", transcript)
+            transcript = stt.transcribe(
+                audio_buf, self.stt_model, self._stt_language(), self.stt_prompt
+            )
+            log.info(
+                "Transcripción (%.1fs, RMS=%.0f, voz=%.0f%%): %s",
+                duration, level, speech_ratio * 100, transcript,
+            )
             if not transcript:
-                self._overlay.update("(no se detectó voz)")
-                time.sleep(1.2)
-                self._reset_idle()
+                self._flash("(no speech detected)", 1.2)
                 return
-            # 2) refino por modo
-            refiner = refine.Refiner(self.cfg)
-            final = refiner.refine(transcript, self.mode, self.language)
-            if not final:
+            if stt.looks_hallucinated(transcript, speech_ratio):
+                log.warning("Descartada como alucinación de Whisper: %r", transcript)
+                self._flash("(didn't catch that — say it again)", 1.5)
+                return
+            # 2) refino por modo (si falla, cae a la transcripción cruda: nunca bloquea)
+            # Fast-lane: dictados cortos en modos marcados se pegan tal cual —
+            # Whisper ya puntúa bien frases breves y ahorramos 2-6s de LLM.
+            fast_words = int(self.cfg.get("llm.fast_lane_words", 9))
+            n_words = len(transcript.split())
+            if (
+                fast_words > 0
+                and modes.MODES.get(self.mode, {}).get("fast_lane")
+                and n_words <= fast_words
+            ):
+                log.info("Fast-lane (%d palabras): sin refino LLM.", n_words)
                 final = transcript
+            else:
+                try:
+                    final = refine.Refiner(self.cfg).refine(transcript, self.mode, self.language)
+                except Exception:
+                    log.exception("Refinado falló; uso transcripción cruda")
+                    final = transcript
+            final = final or transcript
             self._last_result = final
-            log.info("Final: %s", final)
+            self._push_history(final)
+            log.info("Final (+%.1fs): %s", time.monotonic() - t0, final)
             # 3) entregar
             auto_paste = bool(self.cfg.get("output.auto_paste", True))
             copy = bool(self.cfg.get("output.copy_to_clipboard", True))
@@ -241,23 +393,117 @@ class DictadorApp(rumps.App):
             self._state = "IDLE"
         self._refresh_title()
 
-    # ---------- acciones de menú ----------
-    def test_dictation(self, _sender):
-        if self._state != "IDLE":
-            rumps.notification("Dictador", "Ocupado", "Ya hay una grabación en curso")
-            return
-        rumps.notification("Dictador", "Prueba", "Pulsa F5 o el botón para dictar ahora.")
-        self.toggle_record()
+    # ---------- historial ----------
+    def _push_history(self, text: str):
+        self._history.appendleft(text)
+        try:
+            self._recent_empty._menuitem.setHidden_(True)
+            for i, mi in enumerate(self._recent_items):
+                if i < len(self._history):
+                    t = self._history[i].replace("\n", " ")
+                    mi.title = (t[:57] + "…") if len(t) > 58 else t
+                    mi._menuitem.setHidden_(False)
+                else:
+                    mi._menuitem.setHidden_(True)
+        except Exception:
+            log.debug("No pude refrescar el submenú Recent", exc_info=True)
 
+    def _make_recent_cb(self, i: int):
+        def cb(_sender):
+            if i < len(self._history):
+                output.copy_to_clipboard(self._history[i])
+                rumps.notification("Voxly", "Copied to clipboard", self._history[i][:80])
+        return cb
+
+    # ---------- settings ----------
+    def _toggle_login(self, sender):
+        if sender.state:
+            try:
+                os.unlink(LAUNCH_AGENT)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                log.exception("No pude quitar el LaunchAgent")
+                return
+            sender.state = 0
+        else:
+            try:
+                os.makedirs(os.path.dirname(LAUNCH_AGENT), exist_ok=True)
+                with open(LAUNCH_AGENT, "wb") as f:
+                    # `open -a` en vez del binario directo: no duplica instancia
+                    # si Voxly ya está corriendo y sobrevive a que muevan el .app
+                    plistlib.dump(
+                        {
+                            "Label": "com.eduardocrovetto.dictador",
+                            "ProgramArguments": ["/usr/bin/open", "-a", "Voxly"],
+                            "RunAtLoad": True,
+                        },
+                        f,
+                    )
+            except Exception:
+                log.exception("No pude crear el LaunchAgent")
+                return
+            sender.state = 1
+
+    def _toggle_sounds(self, sender):
+        self._sounds = not self._sounds
+        sender.state = 1 if self._sounds else 0
+        self._prefs["sounds"] = self._sounds
+        _save_prefs(self._prefs)
+        if self._sounds:
+            self._play_sound("Pop")
+
+    def _play_sound(self, name: str):
+        if not self._sounds:
+            return
+        try:
+            from AppKit import NSSound
+
+            snd = self._snd_cache.get(name)
+            if snd is None:
+                snd = NSSound.soundNamed_(name)
+                if snd is None:
+                    return
+                snd.setVolume_(0.35)   # sutil, estilo Wispr
+                self._snd_cache[name] = snd
+            snd.stop()   # por si sigue sonando de la vez anterior
+            snd.play()
+        except Exception:
+            pass
+
+    # ---------- acciones de menú ----------
     def paste_last(self):
         if self._last_result:
             output.copy_to_clipboard(self._last_result)
             output.paste_frontmost()
 
+    def _update_ai_item(self, force: bool = True) -> str:
+        b = refine.detect_backend(self.cfg, force=force)
+        labels = {
+            "ollama": "AI: Ollama ✓",
+            "claude": "AI: Claude API ✓",
+            "openai": "AI: OpenAI-compatible ✓",
+            "none": "AI: none — pasting raw text",
+        }
+        self.ai.title = labels.get(b, f"AI: {b}")
+        return b
+
+    def _redetect_ai(self, _sender):
+        b = self._update_ai_item(force=True)
+        if b == "none":
+            rumps.notification(
+                "Voxly",
+                "No AI engine found",
+                "Start Ollama, or add ANTHROPIC_API_KEY / OPENAI_API_KEY to "
+                "~/.dictador/.env — then click here again.",
+            )
+        else:
+            rumps.notification("Voxly", "AI engine", self.ai.title)
+
     def show_health(self, _sender):
         h = refine.health()
         msg = " · ".join(f"{k}: {'✓' if v else '✗'}" for k, v in h.items())
-        rumps.notification("Dictador", "Backends", msg)
+        rumps.notification("Voxly", "Backends", msg)
         self.status.title = msg
 
     def _quit(self, _sender):
@@ -293,6 +539,31 @@ class DictadorApp(rumps.App):
         super().run()
 
     def _warmup(self):
+        # 0) modelo de voz: si no está, se descarga solo con progreso en el icono
+        try:
+            if not stt.find_model():
+                rumps.notification(
+                    "Voxly",
+                    "Downloading speech model",
+                    "~550MB, one time only — the menu bar icon shows progress.",
+                )
+
+                def _dl_progress(pct: int):
+                    self.title = f"⏬ {pct}%"
+
+                ok_model = stt.ensure_model(progress_cb=_dl_progress)
+                self._refresh_title()
+                if ok_model:
+                    rumps.notification("Voxly", "Ready", "Speech model installed.")
+                else:
+                    rumps.notification(
+                        "Voxly", "Model download failed",
+                        "Check your connection and relaunch Voxly.",
+                    )
+        except Exception as e:
+            log.warning("Auto-descarga de modelo falló: %s", e)
+            self._refresh_title()
+        # 1) whisper-server
         try:
             port = int(self.cfg.get("stt.server_port", 8080))
             threads = int(self.cfg.get("stt.threads", 4))
@@ -304,3 +575,34 @@ class DictadorApp(rumps.App):
                 )
         except Exception as e:
             log.warning("Warmup STT falló (se intentará al primer uso): %s", e)
+        # 2) detección del motor LLM disponible
+        try:
+            self._update_ai_item(force=True)
+        except Exception:
+            pass
+        # Keepalive: en Macs con poca RAM macOS pagina el modelo (~1.6GB) tras
+        # inactividad y el siguiente dictado paga 10-19s de vuelta a memoria.
+        # Un ping de 0.4s de silencio cada N min lo mantiene caliente (~0.3s de
+        # coste). stt.keepalive_min: 0 lo desactiva.
+        try:
+            mins = float(self.cfg.get("stt.keepalive_min", 4))
+        except (TypeError, ValueError):
+            mins = 4.0
+        if mins <= 0:
+            return
+        import numpy as np
+
+        ping = np.zeros(int(0.4 * audio.SR), dtype=np.int16)
+        while True:
+            time.sleep(mins * 60)
+            with self._lock:
+                busy = self._state != "IDLE"
+            if busy:
+                continue
+            try:
+                stt.transcribe(ping, self.stt_model, "es")
+                # re-detección barata: si el usuario arrancó Ollama después de
+                # abrir Voxly, el menú se entera solo
+                self._update_ai_item(force=True)
+            except Exception:
+                pass

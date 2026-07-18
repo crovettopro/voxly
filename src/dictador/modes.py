@@ -22,32 +22,29 @@ def _base_rules(lang: str | None) -> str:
     )
 
 
+# Los labels/hints (UI) van en inglés; la SALIDA del dictado la gobierna
+# app.language (es por defecto). Las claves no se tocan: config y TCC las usan.
+# "fast_lane": True → dictados cortos (llm.fast_lane_words) se pegan sin LLM.
 MODES: dict[str, dict] = {
     "ordenar": {
-        "label": "Ordenar ideas",
-        "hint": "Limpia muletillas y estructura, sin inventar.",
+        "label": "Organize & reply",
+        "hint": "Cleans up your speech; replies come out message-ready.",
+        "fast_lane": True,
         "system": (
             "Reescribe la transcripción como texto claro y bien redactado que conserve exactamente "
             "la intención e información del usuario. Elimina muletillas ('eh', 'o sea', 'bueno'), "
             "repeticiones y falsos arranques. Resuelve autocorrecciones ('quedamos a las 5, bueno, 6' "
             "-> 'quedamos a las 6'). Corrige errores obvios de transcripción. Mantén el tono del "
-            "usuario. No añadas información nueva. Si el usuario listó cosas, devuélvelas como lista."
-        ),
-    },
-    "responder": {
-        "label": "Responder a personas",
-        "hint": "Convierte en respuesta de email/mensaje bien redactada.",
-        "system": (
-            "Convierte la transcripción en una respuesta de mensaje o email clara, cordial y bien "
-            "redactada, lista para enviar. Usa el tono que el usuario empleó. Si el usuario dijo "
-            "puntos sueltos, ensambla un mensaje coherente que los contenga. No inventes contenido: "
-            "si falta información, deja un [pendiente: ...] para que el usuario lo rellene. Saludo y "
-            "despedida breves y naturales."
+            "usuario. No añadas información nueva. Si el usuario listó cosas, devuélvelas como lista. "
+            "CASO ESPECIAL: si lo dictado es claramente una respuesta a un mensaje o email (el usuario "
+            "se dirige a alguien o contesta algo), devuélvelo como mensaje listo para enviar: coherente "
+            "y cordial, con saludo/despedida breves SOLO si el usuario los dictó o son claramente "
+            "necesarios. Si falta un dato, deja [pendiente: ...] para que el usuario lo rellene."
         ),
     },
     "prompt": {
-        "label": "Prompt para IA",
-        "hint": "Convierte lo dictado en un prompt claro para un LLM.",
+        "label": "AI prompt",
+        "hint": "Shapes your dictation into a clear LLM prompt.",
         "system": (
             "Convierte la transcripción en un prompt claro, estructurado y reutilizable para otro "
             "LLM. Incluye rol, tarea, contexto y formato de salida esperado. Usa markdown con "
@@ -56,32 +53,33 @@ MODES: dict[str, dict] = {
         ),
     },
     "resumir": {
-        "label": "Resumir",
-        "hint": "Resume lo dicho en bullets concisos.",
+        "label": "Summarize",
+        "hint": "Condenses what you said into crisp bullets.",
         "system": (
             "Resume la transcripción en una lista de bullets concisos que capturen las ideas "
             "principales. Máximo 7 bullets. Sin preámbulo."
         ),
     },
     "traducir-en-es": {
-        "label": "Traducir EN→ES",
-        "hint": "Traduce del inglés al español manteniendo tono.",
+        "label": "Translate EN→ES",
+        "hint": "Speak English, paste Spanish.",
+        "stt_lang": "en",  # aquí el usuario dicta en inglés: forzar "es" lo rompería
         "system": (
             "Traduce la transcripción del inglés al español conservando tono y muletillas mínimas. "
             "Devuelve solo la traducción."
         ),
     },
     "traducir-es-en": {
-        "label": "Traducir ES→EN",
-        "hint": "Traduce del español al inglés manteniendo tono.",
+        "label": "Translate ES→EN",
+        "hint": "Speak Spanish, paste English.",
         "system": (
             "Traduce la transcripción del español al inglés conservando tono y muletillas mínimas. "
             "Devuelve solo la traducción."
         ),
     },
     "codigo": {
-        "label": "Código / spec",
-        "hint": "Convierte lo dictado en comentario o spec de código.",
+        "label": "Code / spec",
+        "hint": "Turns dictation into a code spec or comment.",
         "system": (
             "Convierte la transcripción en una especificación o comentario de código claro: "
             "requisitos, comportamiento esperado, casos límite. Usa markdown con bloques de código "
@@ -89,16 +87,16 @@ MODES: dict[str, dict] = {
         ),
     },
     "notas": {
-        "label": "Notas Markdown",
-        "hint": "Estructura como nota con headings y listas.",
+        "label": "Markdown notes",
+        "hint": "Structures your speech as a markdown note.",
         "system": (
             "Estructura la transcripción como una nota markdown con un título H2, secciones y "
             "listas según corresponda. Conserva toda la información. Sin preámbulo."
         ),
     },
     "literal": {
-        "label": "Literal (sin reescritura)",
-        "hint": "Solo transcribe, sin tocar el texto.",
+        "label": "Verbatim",
+        "hint": "Exactly what you said — no rewriting.",
         "system": "NONE",  # señal especial: el refinador se salta y devuelve la transcripción tal cual
     },
 }

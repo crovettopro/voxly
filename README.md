@@ -1,4 +1,4 @@
-# Dictador — dictado local pro tipo Wispr Flow
+# Voxly — private, on-device voice dictation (antes "Dictador")
 
 Sistema de dictado por voz **100% local** en macOS (Apple Silicon). No solo transcribe:
 un LLM **ordena y mejora** lo que dices según el **modo** activo. Se lanza con un hotkey,
@@ -102,6 +102,36 @@ hotkey (pynput) ──▶ app (rumps menubar) ──▶ recorder (sounddevice + 
 transcripción (partial o final) es una petición HTTP rápida sin recargar modelo y sin torch.
 
 Cada bloque es un módulo swappable: `stt.py`, `refine.py`, `output.py`, `modes.py`.
+
+## Build, deploy y compartir
+
+```bash
+# Certificado de firma estable (UNA vez; pide tu contraseña en un diálogo).
+# Sin él, cada rebuild invalida los permisos TCC y hay que re-concederlos.
+bash scripts/make-cert.sh
+
+# Build + instalar en /Applications (firma con "Dictador Dev" si existe)
+bash scripts/deploy.sh
+
+# Paquete para compartir con otros Macs (Apple Silicon):
+# genera dist/Voxly-vX.Y.Z-share.zip con el app + install.sh + README
+bash scripts/package.sh
+```
+
+El receptor solo necesita descomprimir y ejecutar `bash install.sh`: instala
+whisper-cpp con brew, descarga el modelo, copia el app, lo firma ad-hoc en su
+Mac (evita el "app dañada" de Gatekeeper) y le guía con los permisos. Para
+distribución seria (sin instalador, doble-click y listo) haría falta Developer
+ID de Apple (99$/año) + notarización.
+
+Gotchas de build aprendidos a base de golpes:
+- El dict del spec es `info_plist=` (no `plist=` — se ignora en silencio) y el
+  bundle id va en `bundle_identifier=`; sin `NSMicrophoneUsageDescription`
+  macOS entrega **silencio** del micro y Whisper alucina "Thank you.".
+- Firmar siempre en `/Applications`, nunca en `dist/` (iCloud re-inyecta
+  xattrs y la firma falla con "detritus not allowed").
+- El identifier de la firma debe coincidir con el CFBundleIdentifier del plist
+  o TCC no asocia los permisos aunque el toggle esté en ON.
 
 ## Limitaciones / siguientes pasos
 - Aprender de correcciones (log de edits + few-shot en el prompt) — lo que hace Wispr.
