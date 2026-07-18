@@ -125,14 +125,23 @@ class DictadorApp(rumps.App):
         with self._lock:
             if self._state != "IDLE":
                 return
-        self._start_record()
+        try:
+            self._start_record()
+        except Exception:
+            log.exception("Error en start_record (se resetea a IDLE)")
+            with self._lock:
+                self._state = "IDLE"
+            self._refresh_title()
 
     def stop_record(self):
         """Push-to-talk: tecla soltada -> termina la grabación."""
         with self._lock:
             if self._state != "RECORDING":
                 return
-        self._stop_record(force=True)
+        try:
+            self._stop_record(force=True)
+        except Exception:
+            log.exception("Error en stop_record")
 
     def _start_record(self):
         with self._lock:
@@ -270,6 +279,14 @@ class DictadorApp(rumps.App):
         from AppKit import NSApplication
 
         _ = NSApplication.sharedApplication()
+        # Construye el overlay en el main thread ANTES de cualquier dictado:
+        # NSPanel solo puede instanciarse aquí (AppKit lanza si se hace desde el hilo
+        # del hotkey al pulsar la tecla de dictado).
+        if self._show_overlay:
+            try:
+                self._overlay.build()
+            except Exception as e:
+                log.warning("No se pudo construir el overlay: %s", e)
         # arranca whisper-server en background para que el primer dictado no pague el coste
         threading.Thread(target=self._warmup, daemon=True).start()
         self._hotkey.start()

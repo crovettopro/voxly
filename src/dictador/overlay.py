@@ -42,6 +42,14 @@ class Overlay:
         self._built = False
         self._visible = False
 
+    def build(self):
+        """Construye el NSPanel. DEBE llamarse desde el main thread (una vez al arrancar).
+
+        NSWindow/NSPanel solo pueden instanciarse en el main thread; si se hace
+        lazily desde el hilo del hotkey, AppKit lanza NSInternalInconsistencyException.
+        """
+        self._build()
+
     def _build(self):
         if not _HAVE_PYOBJC or self._built:
             return
