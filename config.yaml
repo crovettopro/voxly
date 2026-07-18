@@ -11,10 +11,13 @@ stt:
   # Diccionario personal: nombres propios, marcas y jerga que Whisper suele
   # escribir mal. Se pasan como "initial prompt" y sesgan la transcripción
   # hacia estas grafías exactas. Añade los tuyos.
-  dictionary: ["Voxly", "Ucademy", "Eduardo Crovetto"]
+  dictionary: []
   server_port: 8080       # puerto del whisper-server local
   threads: 4              # hilos CPU para el decoder
-  language: "es"          # forzar idioma ahorra ~1.4s/petición vs auto-detección.
+  language: "auto"        # "auto" = idioma del sistema. Forzar un idioma ahorra
+                          # ~1.4s/petición frente a que Whisper lo detecte solo;
+                          # null = detección automática. Fija "es"/"en"/… si
+                          # dictas en un idioma distinto al de tu Mac.
                           # El modo Traducir EN→ES fuerza "en" por su cuenta.
   sample_rate: 16000      # Whisper quiere 16kHz mono
   partial_interval: 2.0   # segundos entre transcripciones del buffer (overlay en vivo)
@@ -85,7 +88,9 @@ llm:
 # --- App ---
 app:
   default_mode: "ordenar"
-  language: "es"          # idioma de salida del refinador
+  language: null          # idioma de salida del refinador. null = conservar el
+                          # idioma hablado (lo normal). Fíjalo solo si quieres
+                          # que la salida sea siempre en un idioma concreto.
   show_overlay: true      # HUD con transcripción en vivo
   overlay_position: "bottom-right"   # "bottom-right" | "top-right" | "center"
   sounds: true            # clic sutil al empezar/terminar de grabar (menú: Settings → Sounds)

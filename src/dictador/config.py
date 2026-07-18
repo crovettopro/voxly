@@ -110,6 +110,37 @@ def load_config(path: pathlib.Path | str | None = None) -> Config:
     return Config(data)
 
 
+def system_language() -> str | None:
+    """Código ISO de 2 letras del idioma del sistema ("es", "en"…), o None.
+
+    Es el valor por defecto del STT: forzar un idioma ahorra ~1.4s por petición
+    frente a la auto-detección, pero fijarlo en el config que se distribuye
+    haría que Whisper transcribiera como español lo que dicte un inglés.
+    """
+    try:
+        from Foundation import NSLocale
+
+        langs = NSLocale.preferredLanguages()
+        if langs:
+            code = str(langs[0]).split("-")[0].strip().lower()
+            if len(code) == 2 and code.isalpha():
+                return code
+    except Exception:
+        pass
+    return None
+
+
+def resolve_language(value: Any) -> str | None:
+    """Traduce el valor del config a un idioma efectivo.
+
+    "auto" -> idioma del sistema; None -> que Whisper lo detecte solo;
+    cualquier otra cosa -> tal cual (el usuario lo ha fijado a mano).
+    """
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        return system_language()
+    return value
+
+
 # Singleton perezoso
 _cfg: Config | None = None
 

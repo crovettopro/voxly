@@ -20,7 +20,7 @@ import time
 import rumps
 
 from . import audio, modes, output, refine, setup_checks, stt, updates
-from .config import get_config
+from .config import get_config, resolve_language
 from .hotkey import HotkeyManager
 from .overlay import Overlay
 
@@ -59,9 +59,10 @@ class DictadorApp(rumps.App):
         cfg = get_config()
         self.cfg = cfg
         self.mode = cfg.get("app.default_mode", "ordenar")
-        self.language = cfg.get("app.language", None)
+        # "auto" -> idioma del sistema de quien use la app, no el del autor.
+        self.language = resolve_language(cfg.get("app.language", None))
         self.stt_model = cfg.get("stt.model")
-        self.stt_lang = cfg.get("stt.language", None)
+        self.stt_lang = resolve_language(cfg.get("stt.language", None))
         self._state = "IDLE"
         self._lock = threading.Lock()
         self._recorder: audio.Recorder | None = None
