@@ -52,10 +52,20 @@ def _which_server() -> str | None:
 
 
 def start_server(model_path: str | None = None, threads: int = 4, port: int = 8080) -> bool:
-    """Arranca whisper-server en background. Idempotente. Devuelve True si está listo."""
+    """Arranca whisper-server en background. Idempotente. Devuelve True si está listo.
+
+    Si ya hay un servidor respondiendo en el puerto (p.ej. de un lanzamiento previo
+    que no se cerró), lo reaprovecha en vez de spawnar uno que no podría bindear.
+    """
     global _server_proc, _server_url
     with _server_lock:
         if _server_proc and _server_proc.poll() is None and _server_ready.is_set():
+            return True
+        _server_url = f"http://127.0.0.1:{port}"
+        # ¿hay ya alguien respondiendo en el puerto? reaprovéchalo
+        if _probe(_server_url):
+            log.info("Reutilizando whisper-server ya activo en %s", _server_url)
+            _server_ready.set()
             return True
         server_bin = _which_server()
         if not server_bin:
@@ -103,23 +113,26 @@ def _reader():
             break
 
 
+def _probe(url: str) -> bool:
+    """True si algo responde en la URL (GET rápido)."""
+    try:
+        requests.get(url, timeout=1.5)
+        return True
+    except requests.exceptions.HTTPError:
+        return True
+    except Exception:
+        return False
+
+
 def _wait_ready(timeout: float = 60) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if _server_proc and _server_proc.poll() is not None:
             log.error("whisper-server murió al arrancar (code %s)", _server_proc.returncode)
             return False
-        try:
-            r = requests.get(f"{_server_url}/health", timeout=2)
-            if r.ok:
-                return True
-        except Exception:
-            # /health puede no existir; probamos /inference con GET rápido fallando distinto
-            try:
-                requests.get(_server_url, timeout=2)
-                return True
-            except Exception:
-                time.sleep(0.5)
+        if _probe(_server_url):
+            return True
+        time.sleep(0.5)
     return False
 
 

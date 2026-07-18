@@ -59,7 +59,7 @@ class Overlay:
             y = (frame.size.height - h) / 2
 
         win = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSRect(x, y, w, h),
+            NSRect((x, y), (w, h)),
             NSBorderlessWindowMask,
             NSBackingStoreBuffered,
             False,
@@ -72,7 +72,7 @@ class Overlay:
 
         # vista de efecto (blur) de fondo
         try:
-            blur = NSVisualEffectView.alloc().initWithFrame_(NSRect(0, 0, w, h))
+            blur = NSVisualEffectView.alloc().initWithFrame_(NSRect((0, 0), (w, h)))
             blur.setMaterial_(NSVisualEffectMaterialPopover)
             blur.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
             blur.setState_(1)  # active
@@ -83,7 +83,7 @@ class Overlay:
         except Exception:
             container = win.contentView()
 
-        label = NSTextField.alloc().initWithFrame_(NSRect(16, 12, w - 32, h - 24))
+        label = NSTextField.alloc().initWithFrame_(NSRect((16, 12), (w - 32, h - 24)))
         label.setBezeled_(False)
         label.setDrawsBackground_(False)
         label.setEditable_(False)
