@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxly — Dictation that stays on your Mac</title>
+<meta name="description" content="Hold a key, speak, let go. Voxly turns your voice into clean text anywhere on your Mac — transcribed on-device, never uploaded.">
+<meta property="og:title" content="Voxly — Dictation that stays on your Mac">
+<meta property="og:description" content="Hold a key, speak, let go. Your voice becomes clean text, transcribed on-device.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    /* El ámbar va en dos tonos: el gráfico (onda, piloto de grabación) puede ser
+       luminoso, pero el mismo tono como TEXTO sobre el panel claro daba 2.7:1,
+       ilegible. --signal-text es la versión que cumple 4.5:1. */
+    --signal: #D08A22;      /* habla cruda: la luz de "grabando" */
+    --signal-text: #8F5A10;
+    --resolved: #0C6E5F;    /* texto resuelto */
+    --ink: #0F1716;
+    --paper: #EDF0EE;
+
+    --bg: var(--paper);
+    --bg-raised: #F7F9F7;
+    --bg-sunken: #E2E7E3;
+    --fg: var(--ink);
+    --fg-muted: #566360;
+    --fg-faint: #616E6A;
+    --rule: #D2DAD5;
+    --accent: var(--resolved);
+    --accent-soft: #DCEBE6;
+    --shadow: 0 1px 2px rgba(15, 23, 22, .06), 0 12px 32px -12px rgba(15, 23, 22, .18);
+
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+    --measure: 34rem;
+    --step--1: clamp(.8rem, .78rem + .1vw, .86rem);
+    --step-0: clamp(1rem, .96rem + .2vw, 1.1rem);
+    --step-1: clamp(1.2rem, 1.12rem + .4vw, 1.4rem);
+    --step-2: clamp(1.5rem, 1.32rem + .9vw, 2rem);
+    --step-3: clamp(2.1rem, 1.7rem + 2vw, 3.4rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0B1211;
+      --bg-raised: #131C1A;
+      --bg-sunken: #080D0C;
+      --fg: #E7EDEA;
+      --fg-muted: #97A5A0;
+      --fg-faint: #6B7A75;
+      --rule: #223029;
+      --accent: #4FBFA8;
+      --accent-soft: #14332D;
+      /* sobre fondo oscuro el ámbar luminoso ya da 7.9:1, no hace falta variante */
+      --signal: #E0A34A;
+      --signal-text: #E0A34A;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 16px 40px -16px rgba(0, 0, 0, .7);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    font-size: var(--step-0);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; line-height: 1.15; margin: 0; }
+  p { margin: 0; }
+  a { color: inherit; }
+
+  .wrap { width: min(100% - 2.5rem, 63rem); margin-inline: auto; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  /* ---------- nav ---------- */
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 1.5rem; }
+  .brand { display: flex; align-items: center; gap: .55rem; font-family: var(--display); font-size: var(--step-1); }
+  .brand-mark { width: 1.1em; height: 1.1em; color: var(--accent); }
+  .nav-link { font-size: var(--step--1); color: var(--fg-muted); text-decoration: none; }
+  .nav-link:hover { color: var(--fg); }
+
+  /* ---------- hero ---------- */
+  .hero { display: grid; gap: 2.5rem; padding-block: clamp(2rem, 6vw, 4.5rem) 1rem; }
+  @media (min-width: 60rem) { .hero { grid-template-columns: 1fr 1fr; align-items: center; gap: 4rem; } }
+
+  .hero h1 { font-size: var(--step-3); letter-spacing: -.015em; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero-lede { max-width: var(--measure); margin-top: 1.1rem; color: var(--fg-muted); font-size: var(--step-1); }
+
+  .cta-row { display: flex; flex-wrap: wrap; align-items: center; gap: .9rem 1.2rem; margin-top: 2rem; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .55rem;
+    padding: .8rem 1.4rem; border-radius: 2rem; border: 1px solid transparent;
+    background: var(--accent); color: var(--bg-raised);
+    font-size: var(--step-0); font-weight: 600; text-decoration: none;
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn:focus-visible, .nav-link:focus-visible, .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .ghost { font-size: var(--step--1); color: var(--fg-muted); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .ghost:hover { color: var(--fg); border-color: var(--accent); }
+  .req { font-family: var(--mono); font-size: var(--step--1); color: var(--fg-faint); margin-top: .9rem; }
+
+  /* ---------- demo: la transformación ---------- */
+  .demo {
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .demo-bar {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .7rem 1rem; border-bottom: 1px solid var(--rule); background: var(--bg-sunken);
+  }
+  .dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--rule); }
+  .demo-mode { margin-left: auto; font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-faint); }
+  .demo-body { display: grid; gap: 1rem; padding: 1.4rem; }
+
+  .demo-label { display: flex; align-items: center; gap: .5rem; font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-faint); }
+  .rec { width: .5rem; height: .5rem; border-radius: 50%; background: var(--signal); }
+  .listening .rec { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+  /* el tipo codifica la transformación: captura en mono, prosa en humanista */
+  .said { font-family: var(--mono); font-size: .88rem; line-height: 1.75; color: var(--signal-text); min-height: 5.5em; }
+  .said .cursor { display: inline-block; width: .55em; height: 1.05em; vertical-align: -.18em; background: var(--signal-text); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+
+  .wave { display: block; width: 100%; height: 34px; }
+
+  .divider { display: flex; align-items: center; gap: .75rem; color: var(--fg-faint); }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  .divider span { font-family: var(--mono); font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; }
+
+  /* min-height fijado al caso más alto (la lista de 3 puntos): si no, el panel
+     pega un salto de 8px cada vez que el ciclo llega a ese ejemplo. */
+  .wrote { font-family: var(--display); font-size: 1.12rem; line-height: 1.55; min-height: 4.8em; }
+  .wrote.pending { color: var(--fg-faint); }
+  .wrote ul { margin: 0; padding-left: 1.1rem; }
+
+  /* ---------- secciones ---------- */
+  section { padding-block: clamp(3rem, 8vw, 5.5rem); }
+  .section-head { max-width: var(--measure); }
+  .section-head h2 { font-size: var(--step-2); margin-top: .5rem; }
+  .section-head p { color: var(--fg-muted); margin-top: .8rem; }
+
+  /* ficha técnica en vez de tarjetas genéricas */
+  .spec { border-top: 1px solid var(--rule); margin-top: 2.5rem; }
+  .spec-row { display: grid; gap: .3rem 2rem; padding-block: 1.5rem; border-bottom: 1px solid var(--rule); }
+  @media (min-width: 48rem) { .spec-row { grid-template-columns: 12rem 1fr auto; align-items: baseline; } }
+  .spec-key { font-family: var(--mono); font-size: var(--step--1); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .spec-val { color: var(--fg-muted); max-width: var(--measure); }
+  .spec-num { font-family: var(--display); font-size: var(--step-1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* pasos: numerados porque SON una secuencia real */
+  .steps { display: grid; gap: 1.5rem; margin-top: 2.5rem; counter-reset: step; }
+  @media (min-width: 48rem) { .steps { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
+  .step { display: grid; gap: .5rem; align-content: start; }
+  .step::before {
+    counter-increment: step; content: counter(step);
+    font-family: var(--display); font-size: var(--step-1); color: var(--accent);
+    width: 2rem; height: 2rem; display: grid; place-items: center;
+    border: 1px solid var(--rule); border-radius: 50%;
+  }
+  .step h3 { font-size: var(--step-1); }
+  .step p { color: var(--fg-muted); font-size: .95rem; }
+  kbd {
+    font-family: var(--mono); font-size: .85em; padding: .15em .45em;
+    border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 5px; background: var(--bg-raised);
+  }
+
+  .modes { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 2rem; }
+  .mode {
+    font-size: .9rem; padding: .45rem .9rem; border-radius: 2rem;
+    border: 1px solid var(--rule); background: var(--bg-raised); color: var(--fg-muted);
+  }
+  .mode.is-default { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); }
+
+  /* ---------- cierre ---------- */
+  .close { background: var(--bg-raised); border-block: 1px solid var(--rule); text-align: center; }
+  .close h2 { font-size: var(--step-2); }
+  .close p { color: var(--fg-muted); margin: .8rem auto 0; max-width: var(--measure); }
+  .close .cta-row { justify-content: center; }
+
+  footer { padding-block: 2.5rem; color: var(--fg-faint); font-size: var(--step--1); }
+  .foot-row { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; justify-content: space-between; }
+  footer a { color: var(--fg-muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav class="nav">
+    <span class="brand">
+      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 11v2"/>
+      </svg>
+      Voxly
+    </span>
+    <a class="nav-link" href="https://github.com/eduardocrovetto/voxly">GitHub</a>
+  </nav>
+
+  <header class="hero">
+    <div>
+      <h1>Speak your mind. <em>Get clean text.</em></h1>
+      <p class="hero-lede">
+        Hold a key anywhere on your Mac, say what you mean, and let go. The words land
+        where your cursor is — already tidied up. Your voice is transcribed on the
+        machine in front of you and never uploaded.
+      </p>
+      <div class="cta-row">
+        <a class="btn" href="https://github.com/eduardocrovetto/voxly/releases/latest/download/Voxly-1.0.0.dmg">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v13m0 0 4.5-4.5M12 16l-4.5-4.5M4 20h16"/>
+          </svg>
+          Download for Mac
+        </a>
+        <a class="ghost" href="https://github.com/eduardocrovetto/voxly">Read the source</a>
+      </div>
+      <p class="req">Free · macOS 13+ · Apple Silicon · 35 MB</p>
+    </div>
+
+    <div class="demo" id="demo">
+      <div class="demo-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="demo-mode" id="demoMode">Organize &amp; reply</span>
+      </div>
+      <div class="demo-body">
+        <p class="demo-label" id="demoStatus"><span class="rec"></span> What you said</p>
+        <p class="said" id="said"></p>
+        <canvas class="wave" id="wave" aria-hidden="true"></canvas>
+        <div class="divider"><span>Voxly</span></div>
+        <div class="wrote pending" id="wrote">Waiting for you to speak…</div>
+      </div>
+    </div>
+  </header>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Why it's different</span>
+      <h2>Dictation that doesn't phone home</h2>
+      <p>
+        Most voice tools stream your microphone to a server. Voxly runs the speech model
+        on your Mac, so the only thing that leaves your machine is nothing at all.
+      </p>
+    </div>
+
+    <div class="spec">
+      <div class="spec-row">
+        <span class="spec-key">On-device</span>
+        <span class="spec-val">Whisper runs locally through Metal. Works on a plane, in a café, with the Wi-Fi off.</span>
+        <span class="spec-num">0 bytes uploaded</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-key">Fast</span>
+        <span class="spec-val">From the moment you release the key to text on screen — including the cleanup pass.</span>
+        <span class="spec-num">~1 second</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-key">Anywhere</span>
+        <span class="spec-val">Slack, Mail, your editor, a form in the browser. If you can type in it, you can talk to it.</span>
+        <span class="spec-num">Any app</span>
+      </div>
+      <div class="spec-row">
+        <span class="spec-key">Yours</span>
+        <span class="spec-val">Free and open source. Bring your own AI for the cleanup step, or skip it and get the raw transcript.</span>
+        <span class="spec-num">No account</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">How it works</span>
+      <h2>Three steps, then it's muscle memory</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>Hold</h3>
+        <p>Press and hold the right <kbd>⌘</kbd> key. A small indicator tells you Voxly is listening.</p>
+      </div>
+      <div class="step">
+        <h3>Speak</h3>
+        <p>Say it how you'd say it out loud. Trail off, correct yourself, change your mind — that's the point.</p>
+      </div>
+      <div class="step">
+        <h3>Let go</h3>
+        <p>The finished text appears wherever your cursor was. Nothing to copy, nothing to paste.</p>
+      </div>
+    </div>
+
+    <div class="section-head" style="margin-top: 3.5rem;">
+      <span class="eyebrow">Modes</span>
+      <h2>Same voice, different output</h2>
+      <p>Switch modes from the menu bar. Each one rewrites what you said for a different purpose.</p>
+    </div>
+    <div class="modes">
+      <span class="mode is-default">Organize &amp; reply</span>
+      <span class="mode">Verbatim</span>
+      <span class="mode">Summarize</span>
+      <span class="mode">AI prompt</span>
+      <span class="mode">Markdown notes</span>
+      <span class="mode">Code spec</span>
+      <span class="mode">Translate EN→ES</span>
+      <span class="mode">Translate ES→EN</span>
+    </div>
+  </div>
+</section>
+
+<section class="close">
+  <div class="wrap">
+    <h2>Stop typing what you could just say</h2>
+    <p>Free, open source, and it never sends your voice anywhere.</p>
+    <div class="cta-row">
+      <a class="btn" href="https://github.com/eduardocrovetto/voxly/releases/latest/download/Voxly-1.0.0.dmg">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v13m0 0 4.5-4.5M12 16l-4.5-4.5M4 20h16"/>
+        </svg>
+        Download Voxly 1.0
+      </a>
+    </div>
+    <p class="req">Requires macOS 13 or later on an Apple Silicon Mac.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-row">
+    <span>Voxly — dictation that stays on your Mac.</span>
+    <span><a href="https://github.com/eduardocrovetto/voxly">Source</a> · <a href="https://github.com/eduardocrovetto/voxly/issues">Report an issue</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var TAKES = [
+    {
+      mode: "Organize & reply",
+      said: "um so I was thinking maybe we push the launch to friday, no wait, thursday works better, and uh let's tell the team in the standup",
+      wrote: "I think we should push the launch to Thursday. Let's tell the team in the standup."
+    },
+    {
+      mode: "Organize & reply",
+      said: "hey can you send me the uh the invoice from last month, the one for the design work I mean",
+      wrote: "Hey — could you send me last month's invoice, the one for the design work?"
+    },
+    {
+      mode: "Markdown notes",
+      said: "note to self buy coffee filters, call the dentist, and finish the q3 report before wednesday",
+      wrote: "<ul><li>Buy coffee filters</li><li>Call the dentist</li><li>Finish the Q3 report before Wednesday</li></ul>"
+    }
+  ];
+
+  var saidEl = document.getElementById("said");
+  var wroteEl = document.getElementById("wrote");
+  var modeEl = document.getElementById("demoMode");
+  var statusEl = document.getElementById("demoStatus");
+  var body = document.querySelector(".demo-body");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* --- forma de onda: solo se agita mientras "escucha" --- */
+  var canvas = document.getElementById("wave");
+  var ctx = canvas.getContext("2d");
+  var listening = false, phase = 0, level = 0;
+
+  function sizeCanvas() {
+    var r = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * r;
+    canvas.height = canvas.offsetHeight * r;
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+  }
+  sizeCanvas();
+  window.addEventListener("resize", sizeCanvas);
+
+  function drawWave() {
+    var w = canvas.offsetWidth, h = canvas.offsetHeight, mid = h / 2;
+    var accent = getComputedStyle(document.documentElement).getPropertyValue("--signal").trim();
+    ctx.clearRect(0, 0, w, h);
+    var bars = Math.floor(w / 5);
+    for (var i = 0; i < bars; i++) {
+      var x = i * 5;
+      /* dos escalas: una envolvente lenta que agrupa sílabas y el detalle
+         rápido dentro de cada una. Sin la envolvente parece un código de barras. */
+      var env = 0.18 + 0.82 * Math.pow(Math.abs(Math.sin(i * 0.085 + phase * 0.3)), 1.6);
+      var detail = Math.abs(Math.sin(i * 1.9 + phase * 1.4) * Math.cos(i * 0.45 - phase * 0.8));
+      var amp = env * (0.2 + detail * 0.8) * level * (h * 0.48);
+      amp = Math.max(amp, 0.8);
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.25 + level * 0.55;
+      ctx.fillRect(x, mid - amp, 3, amp * 2);
+    }
+    ctx.globalAlpha = 1;
+    phase += 0.22;
+    level += ((listening ? 1 : 0) - level) * 0.08;
+    requestAnimationFrame(drawWave);
+  }
+  requestAnimationFrame(drawWave);
+
+  /* --- secuencia: escuchar -> transcribir -> resolver --- */
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function type(text) {
+    return new Promise(function (done) {
+      var i = 0;
+      saidEl.innerHTML = "";
+      var cursor = document.createElement("span");
+      cursor.className = "cursor";
+      var textNode = document.createTextNode("");
+      saidEl.appendChild(textNode);
+      saidEl.appendChild(cursor);
+      (function step() {
+        if (i >= text.length) { cursor.remove(); return done(); }
+        /* ráfagas irregulares: se parece a hablar, no a teclear. Rápido a
+           propósito — el remate es el texto limpio, no verlo escribirse. */
+        var chunk = 2 + Math.floor(Math.random() * 4);
+        textNode.data = text.slice(0, (i += chunk));
+        setTimeout(step, 8 + Math.random() * 22);
+      })();
+    });
+  }
+
+  async function play(take) {
+    modeEl.textContent = take.mode;
+    wroteEl.className = "wrote pending";
+    wroteEl.textContent = "Listening…";
+    statusEl.innerHTML = '<span class="rec"></span> What you said';
+    body.classList.add("listening");
+    listening = true;
+
+    if (reduce) { saidEl.textContent = take.said; }
+    else { await type(take.said); }
+
+    listening = false;
+    body.classList.remove("listening");
+    wroteEl.textContent = "Cleaning up…";
+    await wait(reduce ? 300 : 700);
+
+    wroteEl.className = "wrote";
+    wroteEl.innerHTML = take.wrote;
+    await wait(reduce ? 1200 : 4200);
+  }
+
+  (async function loop() {
+    var i = 0;
+    /* no arranca hasta que la demo se ve: nadie se pierde el primer pase */
+    await new Promise(function (r) {
+      var io = new IntersectionObserver(function (entries) {
+        if (entries[0].isIntersecting) { io.disconnect(); r(); }
+      }, { threshold: .35 });
+      io.observe(document.getElementById("demo"));
+    });
+    while (true) {
+      await play(TAKES[i % TAKES.length]);
+      i++;
+    }
+  })();
+})();
+</script>
+
+</body>
+</html>
