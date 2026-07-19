@@ -1,38 +1,49 @@
-"""Generador del icono de Voxly: la "V" formada por barras de onda de voz.
+"""Generador del icono de Voxly: la comilla editorial — el habla hecha texto.
 
-Dibuja el squircle de macOS con gradiente + 5 barras blancas cuyo envolvente
-forma una V. Genera variantes de color, el .icns final y el glyph template
-de la barra de menú.
+Marca compartida con la landing (usevoxly.vercel.app): comilla doble de
+apertura serif (Iowan Old Style, la misma familia del sitio) en color papel
+sobre squircle teal. Sustituye a las barras de onda v1, demasiado parecidas
+al logo de Wispr Flow.
 
 Uso:
-  python scripts/make-icon.py preview            # 3 variantes → assets/preview/
-  python scripts/make-icon.py build <variant>    # icns + menubar → assets/
+  python scripts/make-icon.py preview   # PNG 512 de control → assets/preview/
+  python scripts/make-icon.py build     # .icns + menubar template → assets/
 """
 from __future__ import annotations
 
-import math
 import pathlib
 import subprocess
 import sys
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets"
 
-VARIANTS = {
-    # nombre: (color_top_left, color_bottom_right, color_barras)
-    "violet": ((99, 102, 241), (217, 70, 239), (255, 255, 255)),      # indigo → fucsia
-    "aqua": ((6, 182, 212), (59, 130, 246), (255, 255, 255)),         # cian → azul
-    "neon": ((15, 23, 42), (30, 41, 59), (163, 230, 53)),             # midnight + lima
-}
+# Paleta de marca (la de la landing)
+TEAL_TOP = (16, 122, 105)      # esquina sup-izq, un punto más luminoso
+TEAL_BOTTOM = (8, 84, 72)      # esquina inf-dcha
+PAPER = (237, 240, 238)        # #EDF0EE
 
-# Envolvente en V: alturas relativas de las 5 barras
-BAR_HEIGHTS = [1.0, 0.60, 0.32, 0.60, 1.0]
+# La misma serif que el sitio; Georgia como red de seguridad
+FONTS = [
+    ("/System/Library/Fonts/Supplemental/Iowan Old Style.ttc", 0),
+    ("/System/Library/Fonts/Supplemental/Georgia.ttf", 0),
+]
+
+GLYPH = "“"  # comilla doble de apertura
+
+
+def _font(px: int) -> ImageFont.FreeTypeFont:
+    for path, index in FONTS:
+        try:
+            return ImageFont.truetype(path, px, index=index)
+        except OSError:
+            continue
+    raise SystemExit("No hay serif del sistema disponible (Iowan/Georgia)")
 
 
 def _gradient(size: int, c1, c2) -> Image.Image:
-    """Gradiente diagonal c1 (arriba-izq) → c2 (abajo-dcha)."""
     img = Image.new("RGB", (size, size))
     px = img.load()
     for y in range(size):
@@ -42,131 +53,73 @@ def _gradient(size: int, c1, c2) -> Image.Image:
     return img
 
 
-def _lerp(c1, c2, t):
-    return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
+def _glyph_layer(S: int, color, width_ratio: float) -> Image.Image:
+    """Capa transparente con la comilla centrada ÓPTICAMENTE.
+
+    Las métricas del glyph “ mienten según la fuente (vive pegado al
+    ascender), así que no se confía en textbbox para colocar: se dibuja en
+    un lienzo sobrado, se recorta a la tinta REAL (alpha) y esa caja se pega
+    centrada en el lienzo final. Inmune a rarezas de métrica.
+    """
+    big = S * 3
+    scratch = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(scratch)
+    d.text((big // 2, big // 2), GLYPH, font=_font(S), fill=(*color, 255), anchor="mm")
+    box = scratch.getbbox()
+    if box is None:
+        raise SystemExit("La fuente no tiene tinta para el glyph “")
+    ink = scratch.crop(box)
+    # escalar la tinta al ancho objetivo conservando proporción
+    target_w = int(S * width_ratio)
+    target_h = int(ink.height * target_w / ink.width)
+    ink = ink.resize((target_w, target_h), Image.LANCZOS)
+    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    layer.paste(ink, ((S - target_w) // 2, (S - target_h) // 2), ink)
+    return layer
 
 
-def draw_icon(size: int, c1, c2, cbar, squircle: bool = True, neon: bool = False) -> Image.Image:
-    """Icono a resolución `size`. neon=True añade glow, gradiente por barra y
-    ondas concéntricas de fondo (detalle "letrero de neón")."""
+def draw_icon(size: int) -> Image.Image:
     S = 1024  # se dibuja a 1024 y se reescala (antialias)
     icon = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    grad = _gradient(S, c1, c2).convert("RGBA")
-
-    if squircle:
-        mask = Image.new("L", (S, S), 0)
-        ImageDraw.Draw(mask).rounded_rectangle(
-            [0, 0, S - 1, S - 1], radius=int(S * 0.2237), fill=255
-        )
-        icon.paste(grad, (0, 0), mask)
-    else:
-        icon = grad
-        mask = None
-
-    n = len(BAR_HEIGHTS)
-    bar_w = S * 0.085
-    gap = S * 0.055
-    total_w = n * bar_w + (n - 1) * gap
-    x0 = (S - total_w) / 2
-    max_h = S * 0.52
-    cy = S * 0.5
-
-    CYAN = (34, 211, 238)
-    # colores por barra: bordes = cbar (lima), centro = cian → acentúa la V
-    bar_cols = [_lerp(cbar, CYAN, 1 - abs(i - (n - 1) / 2) / ((n - 1) / 2)) for i in range(n)] \
-        if neon else [cbar] * n
-
-    if neon:
-        # ondas de sonido concéntricas, muy sutiles, tras las barras
-        rip = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-        rd = ImageDraw.Draw(rip)
-        for r in (0.40, 0.52, 0.64):
-            rr = S * r
-            rd.ellipse([S / 2 - rr, cy - rr, S / 2 + rr, cy + rr],
-                       outline=(255, 255, 255, 16), width=int(S * 0.007))
-        if mask is not None:
-            icon.paste(Image.alpha_composite(icon.crop((0, 0, S, S)), rip), (0, 0), mask)
-        else:
-            icon = Image.alpha_composite(icon, rip)
-
-    # capa de barras (para poder duplicarla como glow)
-    bars = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(bars)
-    for i, h in enumerate(BAR_HEIGHTS):
-        bh = max_h * h
-        x = x0 + i * (bar_w + gap)
-        bd.rounded_rectangle(
-            [x, cy - bh / 2, x + bar_w, cy + bh / 2],
-            radius=bar_w / 2,
-            fill=(*bar_cols[i], 255),
-        )
-
-    if neon:
-        glow = bars.filter(ImageFilter.GaussianBlur(S * 0.028))
-        glow.putalpha(glow.getchannel("A").point(lambda a: int(a * 0.75)))
-        icon = Image.alpha_composite(icon, glow)
-    icon = Image.alpha_composite(icon, bars)
+    grad = _gradient(S, TEAL_TOP, TEAL_BOTTOM).convert("RGBA")
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, S - 1, S - 1], radius=int(S * 0.2237), fill=255
+    )
+    icon.paste(grad, (0, 0), mask)
+    icon = Image.alpha_composite(icon, _glyph_layer(S, PAPER, 0.52))
     return icon.resize((size, size), Image.LANCZOS)
+
+
+def draw_menubar(scale: int) -> Image.Image:
+    """Glyph template: comilla negra sobre alpha; macOS lo tiñe él solo."""
+    S = 22 * scale
+    big = _glyph_layer(22 * 8, (0, 0, 0), 0.62)  # se dibuja grande y se baja
+    return big.resize((S, S), Image.LANCZOS)
 
 
 def preview():
     out = ASSETS / "preview"
     out.mkdir(parents=True, exist_ok=True)
-    # composite: las 3 variantes lado a lado sobre fondo neutro
-    pad, cell = 60, 360
-    board = Image.new("RGB", (3 * cell + 4 * pad, cell + 2 * pad + 60), (245, 245, 247))
-    from PIL import ImageFont
-
-    for i, (name, (c1, c2, cb)) in enumerate(VARIANTS.items()):
-        ic = draw_icon(cell, c1, c2, cb, neon=(name == "neon"))
-        board.paste(ic, (pad + i * (cell + pad), pad), ic)
-        (out / f"voxly-{name}.png").write_bytes(b"")
-        draw_icon(512, c1, c2, cb, neon=(name == "neon")).save(out / f"voxly-{name}.png")
-        d = ImageDraw.Draw(board)
-        d.text(
-            (pad + i * (cell + pad) + cell / 2, pad + cell + 22),
-            name, fill=(60, 60, 67), anchor="mm",
-        )
-    path = out / "voxly-variants.png"
-    board.save(path)
+    path = out / "voxly-quote.png"
+    draw_icon(512).save(path)
     print(path)
 
 
-def build(variant: str):
-    c1, c2, cb = VARIANTS[variant]
+def build():
     ASSETS.mkdir(exist_ok=True)
-    # --- .icns ---
     iconset = ASSETS / "Voxly.iconset"
     iconset.mkdir(exist_ok=True)
     for pts in (16, 32, 128, 256, 512):
-        draw_icon(pts, c1, c2, cb, neon=(variant == "neon")).save(iconset / f"icon_{pts}x{pts}.png")
-        draw_icon(pts * 2, c1, c2, cb, neon=(variant == "neon")).save(iconset / f"icon_{pts}x{pts}@2x.png")
+        draw_icon(pts).save(iconset / f"icon_{pts}x{pts}.png")
+        draw_icon(pts * 2).save(iconset / f"icon_{pts}x{pts}@2x.png")
     subprocess.run(
         ["iconutil", "-c", "icns", str(iconset), "-o", str(ASSETS / "Voxly.icns")],
         check=True,
     )
-    # --- glyph template de barra de menú (monocromo negro, alpha) ---
     for scale, name in ((1, "menubar.png"), (2, "menubar@2x.png")):
-        S = 22 * scale
-        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        n = len(BAR_HEIGHTS)
-        bar_w = S * 0.13
-        gap = S * 0.075
-        total_w = n * bar_w + (n - 1) * gap
-        x0 = (S - total_w) / 2
-        max_h = S * 0.78
-        cy = S / 2
-        for i, h in enumerate(BAR_HEIGHTS):
-            bh = max_h * h
-            x = x0 + i * (bar_w + gap)
-            d.rounded_rectangle(
-                [x, cy - bh / 2, x + bar_w, cy + bh / 2],
-                radius=bar_w / 2,
-                fill=(0, 0, 0, 255),
-            )
-        img.save(ASSETS / name)
-    print(f"OK: assets/Voxly.icns + assets/menubar*.png (variante {variant})")
+        draw_menubar(scale).save(ASSETS / name)
+    print("OK: assets/Voxly.icns + assets/menubar*.png (marca comilla)")
 
 
 if __name__ == "__main__":
@@ -174,4 +127,4 @@ if __name__ == "__main__":
     if cmd == "preview":
         preview()
     else:
-        build(sys.argv[2])
+        build()
