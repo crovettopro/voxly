@@ -92,6 +92,7 @@ class DictadorApp(rumps.App):
             quit_button=None,        # rumps añade un "Quit" propio si no se anula
         )                            # (usamos el nuestro, que apaga server/hotkey)
         self._build_menu()
+        self._apply_login_default()
         self._toggle_mode = cfg.get("hotkeys.toggle_mode", "toggle")
         self._hotkey = HotkeyManager(
             toggle_mode=self._toggle_mode,
@@ -485,6 +486,40 @@ class DictadorApp(rumps.App):
         return cb
 
     # ---------- settings ----------
+    def _install_launch_agent(self) -> bool:
+        try:
+            os.makedirs(os.path.dirname(LAUNCH_AGENT), exist_ok=True)
+            with open(LAUNCH_AGENT, "wb") as f:
+                # `open -a` en vez del binario directo: no duplica instancia
+                # si Voxly ya está corriendo y sobrevive a que muevan el .app
+                plistlib.dump(
+                    {
+                        "Label": "com.eduardocrovetto.dictador",
+                        "ProgramArguments": ["/usr/bin/open", "-a", "Voxly"],
+                        "RunAtLoad": True,
+                    },
+                    f,
+                )
+            return True
+        except Exception:
+            log.exception("No pude crear el LaunchAgent")
+            return False
+
+    def _apply_login_default(self):
+        """Start at login viene activado de fábrica, UNA sola vez.
+
+        Una app de hotkey solo sirve si está corriendo: si el usuario reinicia
+        y Voxly no arranca, el hotkey "no funciona". Si el usuario lo desactiva
+        en Settings, el flag en prefs evita re-activárselo jamás.
+        """
+        if self._prefs.get("login_default_applied"):
+            return
+        if not os.path.exists(LAUNCH_AGENT) and self._install_launch_agent():
+            self.login_item.state = 1
+            log.info("Start at login activado por defecto (primera ejecución).")
+        self._prefs["login_default_applied"] = True
+        _save_prefs(self._prefs)
+
     def _toggle_login(self, sender):
         if sender.state:
             try:
@@ -496,23 +531,8 @@ class DictadorApp(rumps.App):
                 return
             sender.state = 0
         else:
-            try:
-                os.makedirs(os.path.dirname(LAUNCH_AGENT), exist_ok=True)
-                with open(LAUNCH_AGENT, "wb") as f:
-                    # `open -a` en vez del binario directo: no duplica instancia
-                    # si Voxly ya está corriendo y sobrevive a que muevan el .app
-                    plistlib.dump(
-                        {
-                            "Label": "com.eduardocrovetto.dictador",
-                            "ProgramArguments": ["/usr/bin/open", "-a", "Voxly"],
-                            "RunAtLoad": True,
-                        },
-                        f,
-                    )
-            except Exception:
-                log.exception("No pude crear el LaunchAgent")
-                return
-            sender.state = 1
+            if self._install_launch_agent():
+                sender.state = 1
 
     def _toggle_sounds(self, sender):
         self._sounds = not self._sounds
