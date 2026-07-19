@@ -62,7 +62,8 @@ Key and behavior are configurable (`config.yaml > hotkeys`).
 
 Switch modes from the menu bar or with Ctrl+Shift+M. To make every mode follow
 your personal style, add free-text rules in `config.yaml > llm.custom_rules`
-("Never use semicolons", "Spell it Ucademy", …). Building from source? You can
+("Never use semicolons", "Always spell our product name in caps", …). Building
+from source? You can
 define whole new modes in `src/voooxly/modes.py`.
 
 ## Privacy model
