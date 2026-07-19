@@ -192,15 +192,7 @@ class Recorder:
         self._stop_event.set()
         if self._partial_thread and self._partial_thread.is_alive():
             self._partial_thread.join(timeout=2)
-        try:
-            if self._stream:
-                # abort() descarta buffers pendientes en vez de esperarlos:
-                # un stream atascado por TCC nunca los entregaría y stop() colgaría
-                self._stream.abort()
-                self._stream.close()
-        except Exception:
-            pass
-        self._stream = None
+        self._close_stream_with_watchdog()
         audio = self.get_full_audio()
         duration = len(audio) / SR
         log.info(
@@ -210,6 +202,39 @@ class Recorder:
         if self._on_stop:
             keep = duration >= self.cfg.min_duration
             self._on_stop(audio if keep else None, duration)
+
+    def _close_stream_with_watchdog(self) -> None:
+        """Cierra el stream sin dejarse colgar por CoreAudio.
+
+        abort()/close() pueden bloquearse PARA SIEMPRE (visto en real: el
+        recorder quedó zombi, _on_stop nunca llegó y la app se quedó en
+        RECORDING con el micro abierto, inmune a release/Esc/tope de 60s
+        porque el guard _finalized convierte los reintentos en no-ops). El
+        cierre va en un hilo con timeout: si no responde en 3s, se abandona el
+        stream (se libera al morir el proceso) y el audio capturado se procesa
+        igual — recuperarse vale más que un close limpio.
+        """
+        stream, self._stream = self._stream, None
+        if stream is None:
+            return
+
+        def _close():
+            try:
+                # abort() descarta buffers pendientes en vez de esperarlos:
+                # un stream atascado por TCC nunca los entregaría y stop() colgaría
+                stream.abort()
+                stream.close()
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_close, daemon=True)
+        t.start()
+        t.join(timeout=3.0)
+        if t.is_alive():
+            log.warning(
+                "El stream de audio no respondió al abort/close en 3s "
+                "(CoreAudio colgado): continúo sin esperarlo."
+            )
 
     def _partial_loop(self) -> None:
         while not self._stop_event.is_set():

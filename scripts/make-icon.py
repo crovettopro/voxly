@@ -98,6 +98,24 @@ def draw_menubar(scale: int) -> Image.Image:
     return big.resize((S, S), Image.LANCZOS)
 
 
+REC_RED = (226, 68, 60)
+
+
+def draw_menubar_rec(scale: int) -> Image.Image:
+    """Punto rojo de grabación (NO template: se muestra en color).
+
+    Supersampling 4×: un círculo pequeño dibujado a tamaño final sale dentado.
+    """
+    S = 22 * scale
+    big = S * 4
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    r = int(big * 0.26)
+    c = big // 2
+    d.ellipse([c - r, c - r, c + r, c + r], fill=(*REC_RED, 255))
+    return img.resize((S, S), Image.LANCZOS)
+
+
 def preview():
     out = ASSETS / "preview"
     out.mkdir(parents=True, exist_ok=True)
@@ -119,7 +137,9 @@ def build():
     )
     for scale, name in ((1, "menubar.png"), (2, "menubar@2x.png")):
         draw_menubar(scale).save(ASSETS / name)
-    print("OK: assets/Voxly.icns + assets/menubar*.png (marca comilla)")
+    for scale, name in ((1, "menubar-rec.png"), (2, "menubar-rec@2x.png")):
+        draw_menubar_rec(scale).save(ASSETS / name)
+    print("OK: assets/Voxly.icns + assets/menubar*.png + menubar-rec*.png")
 
 
 if __name__ == "__main__":

@@ -110,18 +110,19 @@ def test_modo_desconocido_cae_en_ordenar():
 
 # --- Flash del HUD al ciclar (feedback de Ctrl+Shift+M) ---
 
-def test_flash_text_muestra_nombre_posicion_y_hint():
-    txt = modes.flash_text("prompt")
-    assert "AI prompt" in txt
-    assert "2/8" in txt  # segundo modo del ciclo
-    assert modes.MODES["prompt"]["hint"] in txt
+def test_flash_parts_muestra_nombre_posicion_y_hint():
+    title, body = modes.flash_parts("prompt")
+    assert "AI prompt" in title
+    assert "2/8" in title  # segundo modo del ciclo
+    assert body == modes.MODES["prompt"]["hint"]
 
 
-def test_flash_text_de_todos_los_modos_tiene_dos_lineas():
+def test_flash_parts_de_todos_los_modos_tiene_titulo_y_cuerpo():
     for key in modes.MODES:
-        lines = modes.flash_text(key).split("\n")
-        assert len(lines) == 2 and lines[0] and lines[1], key
+        title, body = modes.flash_parts(key)
+        assert title.startswith("❯ ") and body, key
 
 
-def test_flash_text_con_modo_desconocido_no_lanza():
-    assert "Organize" in modes.flash_text("no-existe")
+def test_flash_parts_con_modo_desconocido_no_lanza():
+    title, _ = modes.flash_parts("no-existe")
+    assert "Organize" in title

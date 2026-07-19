@@ -81,8 +81,12 @@ class DictadorApp(rumps.App):
         # hacia esas grafías). Whisper solo usa ~224 tokens: se recorta.
         self.stt_prompt = self._build_stt_prompt()
 
-        icon_path = self._menubar_icon_path()
+        icon_path = self._asset("menubar.png")
         self._has_icon = icon_path is not None
+        self._idle_icon = icon_path
+        self._rec_icon = self._asset("menubar-rec.png")
+        self._rec_shown = False
+        self._timer_seq = 0
         super().__init__(
             name="Voxly",
             icon=icon_path,          # glyph template (se adapta a claro/oscuro)
@@ -117,16 +121,16 @@ class DictadorApp(rumps.App):
             pass
 
     @staticmethod
-    def _menubar_icon_path() -> str | None:
+    def _asset(name: str) -> str | None:
         import os
         import sys
 
         cands = []
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            cands.append(os.path.join(meipass, "assets", "menubar.png"))
+            cands.append(os.path.join(meipass, "assets", name))
         repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        cands.append(os.path.join(repo, "assets", "menubar.png"))
+        cands.append(os.path.join(repo, "assets", name))
         for c in cands:
             if os.path.exists(c):
                 return c
@@ -236,7 +240,8 @@ class DictadorApp(rumps.App):
 
         def _do():
             try:
-                self._overlay.show(modes.flash_text(self.mode))
+                title, body = modes.flash_parts(self.mode)
+                self._overlay.show(body, title=title)
                 time.sleep(1.4)
                 if self._mode_flash_seq != seq:
                     return  # hubo otro cambio de modo: su flash manda
@@ -260,12 +265,55 @@ class DictadorApp(rumps.App):
     def _refresh_title(self):
         label = modes.MODES.get(self.mode, {}).get("label", "Voxly")
         state = self._state
-        # barra de menú minimalista: glyph solo en reposo, emoji de estado activo
-        self.title = {"RECORDING": "🔴", "PROCESSING": "⏳"}.get(
-            state, None if self._has_icon else "🎙"
-        )
+        # Barra de menú: glyph template en reposo; grabando = punto rojo +
+        # cronómetro (lo lleva _rec_timer); procesando = glyph + "…".
+        if state == "RECORDING" and self._rec_icon:
+            self._swap_icon(rec=True)
+        else:
+            self._swap_icon(rec=False)
+            self.title = {"RECORDING": "🔴", "PROCESSING": "…"}.get(
+                state, None if self._has_icon else "🎙"
+            )
         state_en = {"IDLE": "ready", "RECORDING": "recording", "PROCESSING": "processing"}
         self.status.title = f"Mode: {label} · {state_en.get(state, state)}"
+
+    def _swap_icon(self, rec: bool):
+        """Cambia el icono de la barra en el main thread (AppKit no es
+        thread-safe y _refresh_title llega desde hilos de grabación)."""
+        if not self._has_icon or rec == self._rec_shown or (rec and not self._rec_icon):
+            return
+        self._rec_shown = rec
+
+        def apply():
+            try:
+                self.template = not rec
+                self.icon = self._rec_icon if rec else self._idle_icon
+            except Exception:
+                log.debug("No pude cambiar el icono de la barra", exc_info=True)
+
+        try:
+            from PyObjCTools import AppHelper
+
+            AppHelper.callAfter(apply)
+        except Exception:
+            apply()
+
+    def _start_rec_timer(self):
+        """Cronómetro 0:07 junto al punto rojo mientras se graba."""
+        self._timer_seq += 1
+        seq = self._timer_seq
+        t0 = time.monotonic()
+
+        def run():
+            while self._timer_seq == seq:
+                with self._lock:
+                    if self._state != "RECORDING":
+                        break
+                s = int(time.monotonic() - t0)
+                self.title = f" {s // 60}:{s % 60:02d}"
+                time.sleep(1.0)
+
+        threading.Thread(target=run, daemon=True).start()
 
     # ---------- grabación ----------
     def toggle_record(self):
@@ -337,12 +385,13 @@ class DictadorApp(rumps.App):
         )
         self._recorder = audio.Recorder(acfg)
         if self._show_overlay:
-            self._overlay.show("Listening — speak now.")
+            self._overlay.show("Speak now.", title="● Listening")
         # hilo de partials: re-transcribe la ventana reciente
         self._partial_running.set()
         self._partial_thread = threading.Thread(target=self._partial_loop, daemon=True)
         self._partial_thread.start()
         self._recorder.start(on_stop=self._on_stop)
+        self._start_rec_timer()
         self._play_sound("Pop")     # "te escucho"
         # Pausar la música (Spotify/Music) mientras dictas. En hilo aparte:
         # osascript tarda 100-300ms y no debe retrasar la captura del micro.
@@ -414,17 +463,17 @@ class DictadorApp(rumps.App):
         with self._lock:
             self._state = "PROCESSING"
         self._refresh_title()
-        self._overlay.update("Transcribing…")
+        self._overlay.show("Transcribing…", title="✦ Processing")
         threading.Thread(
             target=self._process,
             args=(audio_buf, duration, had_speech, speech_ratio),
             daemon=True,
         ).start()
 
-    def _flash(self, msg: str, secs: float = 1.6):
+    def _flash(self, msg: str, secs: float = 1.6, title: str | None = None):
         """Mensaje breve en el HUD (el finally de _process lo cierra después)."""
         try:
-            self._overlay.update(msg)
+            self._overlay.show(msg, title=title)
             time.sleep(secs)
         except Exception:
             pass
@@ -487,7 +536,7 @@ class DictadorApp(rumps.App):
                 return
             # Enseñar ya lo transcrito: la espera del refino (2-6s) se entiende
             # mejor viendo el texto que con un "Processing…" opaco.
-            self._overlay.update(f"✨ {transcript}")
+            self._overlay.show(transcript, title="✦ Polishing")
             # 2) refino por modo (si falla, cae a la transcripción cruda: nunca bloquea)
             # Fast-lane: dictados cortos en modos marcados se pegan tal cual —
             # Whisper ya puntúa bien frases breves y ahorramos 2-6s de LLM.
@@ -533,10 +582,10 @@ class DictadorApp(rumps.App):
                     "Couldn't paste into the active app",
                     "Your text is on the clipboard — press ⌘V to paste it.",
                 )
-                self._flash("Copied — press ⌘V to paste", 2.2)
+                self._flash("Press ⌘V to paste it where you need it.", 2.2, title="✓ Copied")
             else:
                 # mostrar resultado breve y cerrar
-                self._overlay.update(final)
+                self._overlay.show(final, title="✓ Pasted")
                 time.sleep(1.6)
         except Exception:
             log.exception("Error procesando dictado")

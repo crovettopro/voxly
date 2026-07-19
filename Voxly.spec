@@ -26,6 +26,8 @@ datas = [
     (".env.example", "."),
     ("assets/menubar.png", "assets"),
     ("assets/menubar@2x.png", "assets"),
+    ("assets/menubar-rec.png", "assets"),
+    ("assets/menubar-rec@2x.png", "assets"),
 ]
 
 # whisper-server embebido + sus dylibs/backends (generado por
