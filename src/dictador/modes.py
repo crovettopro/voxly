@@ -189,3 +189,15 @@ def system_prompt(mode: str, lang: str | None = DEFAULT_LANG) -> str:
 
 def modes_by_key() -> dict[str, dict]:
     return {k: {"label": v["label"], "hint": v["hint"]} for k, v in MODES.items()}
+
+
+def flash_text(mode: str) -> str:
+    """Texto del HUD al cambiar de modo: nombre, posición en el ciclo y qué
+    hace — para que Ctrl+Shift+M no sea ciclar a ciegas."""
+    keys = list(MODES.keys())
+    spec = MODES.get(mode) or MODES["ordenar"]
+    try:
+        pos = f"  ·  {keys.index(mode) + 1}/{len(keys)}"
+    except ValueError:
+        pos = ""
+    return f"❯ {spec['label']}{pos}\n{spec['hint']}"

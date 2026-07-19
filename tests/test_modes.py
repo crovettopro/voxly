@@ -106,3 +106,22 @@ def test_las_claves_de_modo_no_cambian():
 
 def test_modo_desconocido_cae_en_ordenar():
     assert modes.system_prompt("no-existe", None) == modes.system_prompt("ordenar", None)
+
+
+# --- Flash del HUD al ciclar (feedback de Ctrl+Shift+M) ---
+
+def test_flash_text_muestra_nombre_posicion_y_hint():
+    txt = modes.flash_text("prompt")
+    assert "AI prompt" in txt
+    assert "2/8" in txt  # segundo modo del ciclo
+    assert modes.MODES["prompt"]["hint"] in txt
+
+
+def test_flash_text_de_todos_los_modos_tiene_dos_lineas():
+    for key in modes.MODES:
+        lines = modes.flash_text(key).split("\n")
+        assert len(lines) == 2 and lines[0] and lines[1], key
+
+
+def test_flash_text_con_modo_desconocido_no_lanza():
+    assert "Organize" in modes.flash_text("no-existe")

@@ -152,6 +152,7 @@ class DictadorApp(rumps.App):
         self._update_version = ""
         self._update_downloading = False
         self._paused_players: list[str] = []
+        self._mode_flash_seq = 0
 
         # Recent: los últimos dictados, clic = volver a copiarlos al portapapeles.
         # Los items se PRE-crean ocultos: añadir/quitar items de un NSMenu desde el
@@ -211,6 +212,38 @@ class DictadorApp(rumps.App):
             mi.state = 1 if k == key else 0
         self._refresh_title()
         log.info("Modo: %s", modes.MODES[key]["label"])
+        self._flash_mode()
+
+    def _flash_mode(self):
+        """Flash del HUD con el modo recién activado (nombre + posición + hint).
+
+        Sin esto, ciclar con Ctrl+Shift+M es a ciegas: 8 modos y ninguna pista
+        de en cuál has caído. Se auto-oculta a los ~1.4s; ciclar rápido solo
+        renueva el timer (el seq más nuevo manda) y un dictado en curso tiene
+        prioridad sobre el flash.
+        """
+        if not self._show_overlay or not getattr(self._overlay, "_built", False):
+            return
+        with self._lock:
+            if self._state != "IDLE":
+                return  # el HUD está ocupado con un dictado
+        self._mode_flash_seq += 1
+        seq = self._mode_flash_seq
+
+        def _do():
+            try:
+                self._overlay.show(modes.flash_text(self.mode))
+                time.sleep(1.4)
+                if self._mode_flash_seq != seq:
+                    return  # hubo otro cambio de modo: su flash manda
+                with self._lock:
+                    if self._state != "IDLE":
+                        return  # empezó un dictado: su flujo gestiona el HUD
+                self._overlay.hide()
+            except Exception:
+                log.debug("Flash de modo falló", exc_info=True)
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def cycle_mode(self):
         keys = list(modes.MODES.keys())
