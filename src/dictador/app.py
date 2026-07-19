@@ -19,7 +19,7 @@ import time
 
 import rumps
 
-from . import audio, dictionary, history, media, modes, output, refine, setup_checks, stt, updates
+from . import audio, dictionary, history, media, modes, output, refine, setup_checks, stats, stt, updates
 from .config import get_config, resolve_language
 from .hotkey import HotkeyManager
 from .overlay import Overlay
@@ -135,6 +135,7 @@ class DictadorApp(rumps.App):
         self.status = rumps.MenuItem("Ready", callback=None)
         self.ai = rumps.MenuItem("AI: detecting…", callback=self._redetect_ai)
         self.health = rumps.MenuItem("Backend status…", callback=self.show_health)
+        self.stats_item = rumps.MenuItem("Usage stats…", callback=self._show_stats)
         self.quit = rumps.MenuItem("Quit Voxly", callback=self._quit)
         # Oculto hasta que el comprobador encuentre una versión nueva (ver _warmup).
         self.update_item = rumps.MenuItem("Update available", callback=self._open_update)
@@ -177,6 +178,7 @@ class DictadorApp(rumps.App):
             self.status,
             self.ai,
             self.health,
+            self.stats_item,
             settings,
             rumps.separator,
             self.update_item,
@@ -471,6 +473,7 @@ class DictadorApp(rumps.App):
                 return
             self._last_result = final
             self._push_history(final)
+            stats.bump(len(final.split()), duration)
             log.info("Final (+%.1fs): %s", time.monotonic() - t0, final)
             # 3) entregar
             auto_paste = bool(self.cfg.get("output.auto_paste", True))
@@ -733,6 +736,9 @@ class DictadorApp(rumps.App):
             )
         else:
             subprocess.run(["open", self._update_url], check=False)
+
+    def _show_stats(self, _sender):
+        rumps.notification("Voxly", "Your dictation stats", stats.summary())
 
     def show_health(self, _sender):
         h = refine.health()
