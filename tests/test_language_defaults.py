@@ -39,11 +39,12 @@ def test_el_diccionario_distribuido_no_lleva_datos_personales():
 def test_sin_idioma_el_prompt_no_pide_traducir():
     """El hint de idioma es lo que traduciría la salida; sin idioma no debe estar."""
     prompt = modes.system_prompt("ordenar", None)
-    assert "Escribe la salida en" not in prompt
+    assert "Write the output in the same language the user spoke" in prompt
+    assert "regardless of the language spoken" not in prompt
 
 
 def test_con_idioma_el_prompt_si_lo_pide():
-    assert "Escribe la salida en en" in modes.system_prompt("ordenar", "en")
+    assert "Write the output in en" in modes.system_prompt("ordenar", "en")
 
 
 def test_system_language_devuelve_codigo_de_dos_letras_o_none():
