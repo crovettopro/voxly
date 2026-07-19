@@ -1,8 +1,9 @@
-"""Aviso de actualizaciones: consulta un appcast.json y compara versiones.
+"""Actualizaciones: consulta un appcast.json, compara versiones y descarga el DMG.
 
-Sin auto-instalación: si hay versión nueva, la app muestra un ítem de menú que
-abre la URL de descarga. Sparkle sobre un bundle PyInstaller da más problemas
-que valor para lo que aporta aquí.
+Si hay versión nueva, la app muestra un ítem de menú; el clic descarga el DMG a
+~/Downloads y lo abre montado — al usuario solo le queda arrastrar a
+Applications. Sin auto-reemplazo silencioso: Sparkle sobre un bundle PyInstaller
+da más problemas que valor, y Gatekeeper ya verifica el DMG notarizado.
 
 Cualquier fallo (sin red, JSON roto, campos ausentes) es silencioso salvo en el
 log: un comprobador de updates roto jamás debe estorbar al dictado.
@@ -81,4 +82,45 @@ def check(url: str = APPCAST_URL, local: str | None = None) -> dict | None:
         }
     except Exception as e:
         log.debug("Comprobación de updates falló (ignorado): %s", e)
+        return None
+
+
+def download(
+    url: str,
+    version: str,
+    dest_dir: Path | None = None,
+    progress_cb=None,
+) -> Path | None:
+    """Descarga el DMG a `dest_dir` (~/Downloads por defecto). Ruta o None.
+
+    Se baja a un .part y se renombra al terminar: nunca queda un DMG a medias
+    con el nombre final. Cualquier fallo devuelve None y limpia el .part.
+    `progress_cb(pct)` recibe 0-100 si el servidor manda Content-Length.
+    """
+    dest_dir = dest_dir or Path.home() / "Downloads"
+    dest = dest_dir / f"Voxly-{version}.dmg"
+    part = dest_dir / (dest.name + ".part")
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with requests.get(url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("Content-Length") or 0)
+            done = 0
+            with open(part, "wb") as f:
+                for chunk in r.iter_content(chunk_size=256 * 1024):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress_cb and total:
+                        progress_cb(min(99, done * 100 // total))
+        part.replace(dest)
+        if progress_cb:
+            progress_cb(100)
+        log.info("Update descargada: %s", dest)
+        return dest
+    except Exception as e:
+        log.warning("Descarga de update falló: %s", e)
+        try:
+            part.unlink(missing_ok=True)
+        except Exception:
+            pass
         return None

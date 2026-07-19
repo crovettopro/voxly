@@ -140,6 +140,8 @@ class DictadorApp(rumps.App):
         # Oculto hasta que el comprobador encuentre una versión nueva (ver _warmup).
         self.update_item = rumps.MenuItem("Update available", callback=self._open_update)
         self._update_url = ""
+        self._update_version = ""
+        self._update_downloading = False
 
         # Recent: los últimos dictados, clic = volver a copiarlos al portapapeles.
         # Los items se PRE-crean ocultos: añadir/quitar items de un NSMenu desde el
@@ -590,7 +592,35 @@ class DictadorApp(rumps.App):
             rumps.notification("Voxly", "AI engine", self.ai.title)
 
     def _open_update(self, _sender):
-        if self._update_url:
+        if not self._update_url or self._update_downloading:
+            return
+        self._update_downloading = True
+        threading.Thread(target=self._download_update, daemon=True).start()
+
+    def _download_update(self):
+        # Descarga el DMG a ~/Downloads y lo abre montado: al usuario solo le
+        # queda arrastrar a Applications. Si la descarga falla, se abre la URL
+        # en el navegador (el comportamiento antiguo) para no dejarle tirado.
+        version = self._update_version or "latest"
+        rumps.notification(
+            "Voxly", f"Downloading Voxly {version}…",
+            "The menu bar icon shows progress.",
+        )
+        try:
+            path = updates.download(
+                self._update_url, version,
+                progress_cb=lambda p: setattr(self, "title", f"⏬ {p}%"),
+            )
+        finally:
+            self._update_downloading = False
+            self._refresh_title()
+        if path:
+            subprocess.run(["open", str(path)], check=False)
+            rumps.notification(
+                "Voxly", "Update downloaded",
+                "Drag Voxly into Applications to replace this version, then relaunch.",
+            )
+        else:
             subprocess.run(["open", self._update_url], check=False)
 
     def show_health(self, _sender):
@@ -688,6 +718,7 @@ class DictadorApp(rumps.App):
             info = updates.check()
             if info:
                 self._update_url = info["url"]
+                self._update_version = info["version"]
                 self.update_item.title = f"Update to {info['version']} →"
                 self.update_item._menuitem.setHidden_(False)
         except Exception:
