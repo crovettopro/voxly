@@ -226,6 +226,16 @@
   }
   .mode.is-default { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); }
 
+  /* ---------- comparativa ---------- */
+  .table-scroll { overflow-x: auto; margin-top: 2.5rem; }
+  .compare { width: 100%; min-width: 36rem; border-collapse: collapse; }
+  .compare th, .compare td { padding: 1rem .9rem; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+  .compare thead th { font-family: var(--display); font-size: var(--step-1); font-weight: 600; border-bottom-width: 2px; }
+  .compare tbody th { font-family: var(--mono); font-size: var(--step--1); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-faint); font-weight: 400; white-space: nowrap; }
+  .compare td.good { font-weight: 600; }
+  .compare td.good::before { content: "✓  "; color: var(--accent); }
+  .compare td:last-child { color: var(--fg-muted); }
+
   /* ---------- cierre ---------- */
   .close { background: var(--bg-raised); border-block: 1px solid var(--rule); text-align: center; }
   .close h2 { font-size: var(--step-2); }
@@ -377,6 +387,33 @@
       <span class="mode">Code spec</span>
       <span class="mode">Translate EN→ES</span>
       <span class="mode">Translate ES→EN</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Local vs cloud</span>
+      <h2>Local by design — not a promise, an architecture</h2>
+      <p>
+        Cloud dictation asks you to trust a privacy policy. Voxly removes the question:
+        the audio pipeline simply has nowhere to send your voice.
+      </p>
+    </div>
+    <div class="table-scroll">
+      <table class="compare">
+        <thead>
+          <tr><th></th><th scope="col">Voxly</th><th scope="col">Cloud dictation apps</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Your voice</th><td class="good">Never leaves your Mac</td><td>Uploaded to their servers</td></tr>
+          <tr><th scope="row">Price</th><td class="good">Free</td><td>~$12–15/month</td></tr>
+          <tr><th scope="row">Works offline</th><td class="good">Yes</td><td>No</td></tr>
+          <tr><th scope="row">Usage limits</th><td class="good">None</td><td>Word &amp; minute caps</td></tr>
+          <tr><th scope="row">Source code</th><td class="good">Open on GitHub</td><td>Closed</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </section>
