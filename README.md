@@ -20,7 +20,13 @@ Markdown notes — and the result is pasted right where your cursor is.
 - **Bring your own AI (or none)**: cleanup runs through Ollama (local), Claude API
   or any OpenAI-compatible endpoint — auto-detected. Without any, Voxly pastes the
   raw transcription, which Whisper already punctuates well.
-- **Global hotkey + menu bar + live HUD** with real-time transcription.
+- **Global hotkey + menu bar + live HUD**: a status HUD shows `● Listening`
+  with your words appearing in real time, `✦ Processing` while it polishes and
+  `✓ Pasted` when done; the menu bar turns into a red dot with a timer while
+  you record.
+- **Rich paste**: Markdown modes put both plain text *and* rendered HTML on the
+  clipboard — Mail, Gmail or Notion paste real headings and bullet lists, while
+  terminals and editors get the raw Markdown.
 - **Stays out of your way**: pauses Spotify/Music while you dictate and resumes
   them after; Esc cancels; hold + Shift latches into hands-free recording.
 - **Personal dictionary** (teach it names and jargon, add `wrong -> right`
@@ -36,7 +42,8 @@ and Accessibility permissions, the model download and (optionally) an AI engine.
 - **Right ⌘ (hold)** — push-to-talk: speak while holding, release to finish.
 - **Right ⌘ + Shift** — latch: recording locks hands-free; tap right ⌘ to finish.
 - **Esc** — cancel the dictation in progress; nothing is pasted.
-- **Ctrl+Shift+M** — cycle modes.
+- **Ctrl+Shift+M** — cycle modes; the HUD flashes the mode you landed on
+  (`❯ AI prompt · 2/8`) so you're never cycling blind.
 - **Ctrl+Shift+V** — paste the last result again.
 
 Key and behavior are configurable (`config.yaml > hotkeys`).
@@ -171,7 +178,9 @@ Hard-won build gotchas:
 
 Shipping in 1.0.1: in-app update download, music auto-pause while dictating,
 persistent searchable history, personal dictionary with replacements, usage
-stats, hands-free latch (hold + Shift), custom cleanup rules.
+stats, hands-free latch (hold + Shift), custom cleanup rules, rich paste
+(rendered headings/lists in rich-text apps), redesigned status HUD and
+menu bar recording indicator with timer.
 
 Next up (1.1):
 
