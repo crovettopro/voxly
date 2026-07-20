@@ -113,9 +113,22 @@ class Refiner:
                 },
                 timeout=timeout,
             )
-            if r.status_code == 404 or "not found" in (r.text or "").lower():
-                raise ModelNotAvailable(f"model '{model}' not found on the Ollama host")
-            r.raise_for_status()
+            if r.status_code >= 400:
+                # OJO: sólo aquí, con una respuesta de error real. Antes se
+                # miraba r.text (el cuerpo crudo) SIN comprobar el status, así
+                # que un 200 cuyo texto generado contenía "not found" (p.ej.
+                # "The file was not found...") disparaba ModelNotAvailable y
+                # el dictado se perdía. Un 2xx nunca puede llegar aquí.
+                error_detail = ""
+                try:
+                    body = r.json()
+                    if isinstance(body, dict):
+                        error_detail = str(body.get("error", ""))
+                except ValueError:
+                    pass  # cuerpo de error no-JSON: cae al raise_for_status genérico
+                if "not found" in error_detail.lower():
+                    raise ModelNotAvailable(f"model '{model}' not found on the Ollama host")
+                r.raise_for_status()
             data = r.json()
             return (data.get("message", {}).get("content", "") or "").strip()
         except ModelNotAvailable:
@@ -229,24 +242,60 @@ def export_key(selection, api_key: str | None) -> None:
         os.environ[env_key] = api_key
 
 
+class _CandidateConfig:
+    """Vista de solo lectura: config real + los valores del candidato a probar.
+
+    Refiner sólo lee config vía self.cfg.get(path, default), así que basta con
+    interceptar aquí las claves que el candidato cambia y delegar el resto al
+    Config real. Nada se escribe nunca en el singleton — una validación
+    fallida, cancelada o exitosa no puede dejar rastro en la app en marcha.
+    """
+
+    def __init__(self, base_cfg, overrides: dict):
+        self._base = base_cfg
+        self._overrides = overrides
+
+    def get(self, path: str, default=None):
+        if path in self._overrides:
+            return self._overrides[path]
+        return self._base.get(path, default)
+
+
 def _probe(selection, api_key: str | None, timeout: float) -> str:
-    """Una generación mínima por la MISMA ruta que usa un dictado."""
+    """Una generación mínima por la MISMA ruta que usa un dictado.
+
+    No toca la config real: el Refiner desechable recibe una _CandidateConfig
+    que superpone sólo las claves de ESTE candidato sobre la config real.
+    Además, cada "kind" tiene su propia ruta de host/base_url: los presets
+    openai/groq/openrouter/custom comparten kind="openai" y por tanto
+    llm.openai.*, mientras que ollama tiene su propio llm.ollama.host. Escribir
+    siempre en llm.openai.base_url (como antes) hacía que un probe de Ollama
+    ignorara el host del candidato y probara el que ya hubiera en config, y que
+    validar CUALQUIER preset openai-compatible pisara la config de los otros
+    tres.
+    """
     export_key(selection, api_key)
-    r = Refiner.__new__(Refiner)
     from .config import get_config
 
-    r.cfg = get_config()
-    r.cfg._set_path("llm.openai.base_url", selection.base_url)
-    r.cfg._set_path(f"llm.{selection.provider.kind}.model", selection.model)
-    # El usuario está mirando un diálogo modal mientras esto corre: el timeout
-    # pedido tiene que llegar de verdad al backend, no quedarse sin usar. Los
-    # tres backends leen su timeout de config (no como parámetro), así que se
-    # planta aquí antes de invocarlos.
-    r.cfg._set_path(f"llm.{selection.provider.kind}.timeout", timeout)
-    r.backend = selection.provider.kind
-    if selection.provider.kind == "ollama":
+    kind = selection.provider.kind
+    overrides = {
+        f"llm.{kind}.model": selection.model,
+        # El usuario está mirando un diálogo modal mientras esto corre: el
+        # timeout pedido tiene que llegar de verdad al backend. Los tres
+        # backends leen su timeout de config (no como parámetro).
+        f"llm.{kind}.timeout": timeout,
+    }
+    if kind == "ollama":
+        overrides["llm.ollama.host"] = selection.base_url
+    else:
+        overrides["llm.openai.base_url"] = selection.base_url
+
+    r = Refiner.__new__(Refiner)
+    r.cfg = _CandidateConfig(get_config(), overrides)
+    r.backend = kind
+    if kind == "ollama":
         return r._ollama("Reply with the single word OK.", "ping")
-    if selection.provider.kind == "claude":
+    if kind == "claude":
         return r._claude("Reply with the single word OK.", "ping")
     return r._openai("Reply with the single word OK.", "ping")
 
