@@ -1238,22 +1238,47 @@ class VoooxlyApp(rumps.App):
         super().run()
 
     def _on_onboarding_done(self):
-        """Rearranca el hotkey al cerrar el onboarding.
+        """Relanza la app como proceso NUEVO al cerrar el onboarding.
 
         En run() el listener de pynput arranca ANTES de que se conceda
-        Accesibilidad: sin ese permiso no recibe eventos globales, y concederlo
-        a mitad no reactiva el listener ya vivo (el event tap ya se creó sin
-        permiso). Ese es el bug "la primera vez no dicta, tras reiniciar sí".
-        Rearrancar aquí — con el permiso ya concedido — re-crea el event tap y
-        arregla el dictado sin tener que reiniciar la app. Lo llama finish_ del
-        onboarding tanto al pulsar "Start dictating" como al cerrar la ventana.
+        Accesibilidad: sin ese permiso el CGEventTap no se crea y no llegan
+        eventos globales. Conceder el permiso a mitad — o incluso rearrancar el
+        listener in-process (stop+start) — NO basta: macOS no re-evalúa el
+        permiso de Accesibilidad para el event tap dentro del mismo proceso.
+        Lo confirma el usuario: tras reabrir la app (proceso nuevo) dicta; el
+        rearranque in-process, no. La forma fiable es relanzar la app: con el
+        permiso ya persistido en TCC, el proceso nuevo crea un event tap válido
+        y el hotkey funciona sin más. Solo pasa en el primer arranque.
         """
+        import subprocess
+        from AppKit import NSBundle
+
+        relanzado = False
         try:
-            self._hotkey.stop()
-            self._hotkey.start()
-            log.info("Hotkey rearrancado tras el onboarding.")
+            bundle = str(NSBundle.mainBundle().bundlePath())
+            # Solo relanzamos si vamos como .app (instalado). En dev (python -m)
+            # bundlePath() no es un .app y `open -n` haría algo raro.
+            if bundle.endswith(".app"):
+                subprocess.Popen(["open", "-n", bundle])
+                relanzado = True
+                # un instante para que launchd registre el nuevo proceso y salir
+                threading.Timer(0.5, self._quit_for_relaunch).start()
         except Exception:
-            log.warning("No pude rearrancar el hotkey tras el onboarding", exc_info=True)
+            log.warning("No pude relanzar Voooxly tras el onboarding", exc_info=True)
+
+        if not relanzado:
+            # Fallback (dev sin bundle): rearrancar el listener in-process. No
+            # es tan fiable como relanzar, pero al menos lo intenta.
+            try:
+                self._hotkey.stop()
+                self._hotkey.start()
+                log.info("Hotkey rearrancado in-process (modo dev).")
+            except Exception:
+                log.warning("No pude rearrancar el hotkey", exc_info=True)
+
+    def _quit_for_relaunch(self):
+        # terminate() toca AppKit: va por el hilo principal.
+        self._on_main(lambda: rumps.quit_application())
 
     def _warmup(self):
         # 0) modelo de voz: si no está, se descarga solo con progreso en el icono
