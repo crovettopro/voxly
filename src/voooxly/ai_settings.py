@@ -26,6 +26,10 @@ def load(prefs: dict) -> Selection | None:
     key = prefs.get(CLAVE_PROVEEDOR)
     if not key:
         return None
+    # Un prefs.json corrupto puede tener ai_provider como lista u otro tipo.
+    # No levantamos excepción: la app debe arrancar igual.
+    if not isinstance(key, str):
+        return None
     prov = providers.get(key)
     if prov is None:
         # Un preset retirado en una versión posterior no puede tumbar el arranque.
