@@ -188,3 +188,11 @@ def health() -> dict:
     out["claude"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
     out["openai"] = bool(os.environ.get(cfg.get("llm.openai.api_key_env", "OPENAI_API_KEY")))
     return out
+
+
+def health_summary() -> str:
+    """Texto de 'Backend status…' listo para mostrar."""
+    h = health()
+    if not h:
+        return "No AI backend configured."
+    return " · ".join(f"{k}: {'✓' if v else '✗'}" for k, v in h.items())

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import threading
 import time
 
 log = logging.getLogger("voooxly.output")
@@ -41,12 +42,47 @@ def copy_to_clipboard(text: str, html: str | None = None) -> None:
             log.error("pbcopy falló: %s", e2)
 
 
+_kb = None
+_kb_lock = threading.Lock()
+
+
+def _controller():
+    """El Controller de pynput, construido UNA sola vez.
+
+    Su __init__ consulta la distribución de teclado vía TIS/TSM. Construirlo en
+    cada pegado (desde el hilo worker de _process) lo hacía coincidir tarde o
+    temprano con otro hilo tocando TSM —el listener del hotkey— y entonces
+    HIToolbox mata el proceso: SIGTRAP en dispatch_assert_queue, que NO es una
+    excepción de Python y ningún try/except puede atrapar.
+
+    press()/release() solo usan el mapping ya cacheado y CGEventPost, así que
+    con una única construcción el pegado deja de tocar TSM. Ver warmup().
+    """
+    global _kb
+    with _kb_lock:
+        if _kb is None:
+            from pynput.keyboard import Controller
+
+            _kb = Controller()
+        return _kb
+
+
+def warmup() -> bool:
+    """Paga el coste de TSM al arrancar, desde el main thread y sin hilos aún vivos."""
+    try:
+        _controller()
+        return True
+    except Exception as e:
+        log.warning("No pude preparar el teclado para pegar: %s", e)
+        return False
+
+
 def paste_frontmost() -> bool:
     """Simula Cmd+V en la app activa posteando eventos de teclado (Accesibilidad)."""
     try:
-        from pynput.keyboard import Controller, Key
+        from pynput.keyboard import Key
 
-        kb = Controller()
+        kb = _controller()
         kb.press(Key.cmd)
         kb.press("v")
         time.sleep(0.02)

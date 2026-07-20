@@ -479,6 +479,65 @@ class VoooxlyApp(rumps.App):
         except Exception:
             pass
 
+    # ---------- avisos al usuario ----------
+    # rumps.notification (NSUserNotification) NO entrega nada en macOS 26: la app
+    # ni siquiera llega a registrarse en el Centro de Notificaciones y los avisos
+    # se descartan en silencio. Todo aviso sale por uno de estos dos caminos,
+    # ambos verificados con screencapture/CGWindowList:
+    #   _alert() → NSAlert modal, para info que el usuario ha pedido y quiere leer.
+    #   _hud()   → HUD efímero, para eventos de fondo que NO deben robar el foco.
+
+    def _alert(self, title: str, message: str = ""):
+        """Modal para info pedida por el usuario. No bloquea al que llama."""
+
+        def show():
+            try:
+                rumps.alert(title=title, message=message, ok="OK")
+            except Exception:
+                log.warning("No pude mostrar el alert %r", title, exc_info=True)
+
+        # NSAlert solo puede correr en el main thread; los callbacks de menú ya
+        # están en él, pero _warmup y las descargas llegan desde hilos daemon.
+        if threading.current_thread() is threading.main_thread():
+            show()
+        else:
+            try:
+                from PyObjCTools import AppHelper
+
+                AppHelper.callAfter(show)
+            except Exception:
+                log.warning("No pude encolar el alert %r", title, exc_info=True)
+
+    def _hud(self, msg: str, title: str | None = None, secs: float = 2.0):
+        """Aviso efímero en el HUD, sin bloquear ni robar el foco.
+
+        Comparte contador con el flash de modo: el mensaje más nuevo manda y un
+        dictado en curso tiene prioridad (su flujo gestiona el HUD).
+        """
+        if not self._show_overlay or not getattr(self._overlay, "_built", False):
+            log.info("HUD no disponible, aviso solo al log: %s — %s", title or "", msg)
+            return
+        self._mode_flash_seq += 1
+        seq = self._mode_flash_seq
+
+        def _do():
+            try:
+                with self._lock:
+                    if self._state != "IDLE":
+                        return
+                self._overlay.show(msg, title=title)
+                time.sleep(secs)
+                if self._mode_flash_seq != seq:
+                    return  # llegó un aviso más nuevo: manda el suyo
+                with self._lock:
+                    if self._state != "IDLE":
+                        return  # empezó un dictado
+                self._overlay.hide()
+            except Exception:
+                log.warning("Aviso en el HUD falló", exc_info=True)
+
+        threading.Thread(target=_do, daemon=True).start()
+
     def _finish_cancel(self):
         """Cierre visual de un dictado cancelado con Esc."""
         self._play_sound("Basso")
@@ -505,12 +564,6 @@ class VoooxlyApp(rumps.App):
                         "Micrófono sin señal (RMS=%.0f). ¿Permiso de Micrófono concedido?", level
                     )
                     self._flash("🎤 No signal from the microphone", 2.5)
-                    rumps.notification(
-                        "Voooxly",
-                        "No signal from the microphone",
-                        "Check the mic isn't muted, and System Settings → "
-                        "Privacy & Security → Microphone → Voooxly.",
-                    )
                 else:
                     log.info("Descartado: sin voz (RMS=%.0f).", level)
                     self._flash("(no speech — nothing pasted)", 1.2)
@@ -598,11 +651,6 @@ class VoooxlyApp(rumps.App):
             if auto_paste and status == "copied":
                 # El pegado falló pero el texto SÍ está en el portapapeles:
                 # sin este aviso el usuario ve que "no pasa nada" y lo pierde.
-                rumps.notification(
-                    "Voooxly",
-                    "Couldn't paste into the active app",
-                    "Your text is on the clipboard — press ⌘V to paste it.",
-                )
                 self._flash("Press ⌘V to paste it where you need it.", 2.2, title="✓ Copied")
             else:
                 # mostrar resultado breve y cerrar
@@ -647,8 +695,8 @@ class VoooxlyApp(rumps.App):
 
     def _search_history(self, _sender):
         if not self._save_history_on():
-            rumps.notification(
-                "Voooxly", "History is off",
+            self._alert(
+                "History is off",
                 "Set app.save_history: true in config.yaml to keep dictations.",
             )
             return
@@ -664,7 +712,7 @@ class VoooxlyApp(rumps.App):
             return
         hits = history.search(query, HISTORY_SIZE)
         if not hits:
-            rumps.notification("Voooxly", "No matches", f'Nothing matches "{query}".')
+            self._alert("No matches", f'Nothing matches "{query}".')
             return
         # Los resultados se sirven en el propio submenú Recent (clic = copiar);
         # el siguiente dictado lo devuelve a "Recent" normal.
@@ -673,8 +721,8 @@ class VoooxlyApp(rumps.App):
             self._history.appendleft(t)
         self.recent_parent.title = f"Recent — “{query}”"
         self._refresh_recent()
-        rumps.notification(
-            "Voooxly", f"{len(hits)} match(es)",
+        self._alert(
+            f"{len(hits)} match(es)",
             "They're in the Recent submenu — click one to copy it.",
         )
 
@@ -682,7 +730,7 @@ class VoooxlyApp(rumps.App):
         def cb(_sender):
             if i < len(self._history):
                 output.copy_to_clipboard(self._history[i])
-                rumps.notification("Voooxly", "Copied to clipboard", self._history[i][:80])
+                self._hud(self._history[i][:80], title="✓ Copied to clipboard")
         return cb
 
     # ---------- settings ----------
@@ -713,10 +761,10 @@ class VoooxlyApp(rumps.App):
         try:
             desc = dictionary.add(entry)
         except ValueError as e:
-            rumps.notification("Voooxly", "Not added", str(e))
+            self._alert("Not added", str(e))
             return
         self.stt_prompt = self._build_stt_prompt()  # sesga ya el próximo dictado
-        rumps.notification("Voooxly", "Added to dictionary", desc)
+        self._hud(desc, title="✓ Added to dictionary")
 
     def _install_launch_agent(self) -> bool:
         try:
@@ -812,14 +860,13 @@ class VoooxlyApp(rumps.App):
     def _redetect_ai(self, _sender):
         b = self._update_ai_item(force=True)
         if b == "none":
-            rumps.notification(
-                "Voooxly",
+            self._alert(
                 "No AI engine found",
                 "Start Ollama, or add ANTHROPIC_API_KEY / OPENAI_API_KEY to "
                 "~/.voooxly/.env — then click here again.",
             )
         else:
-            rumps.notification("Voooxly", "AI engine", self.ai.title)
+            self._hud(self.ai.title, title="AI engine")
 
     def _open_update(self, _sender):
         if not self._update_url or self._update_downloading:
@@ -832,10 +879,7 @@ class VoooxlyApp(rumps.App):
         # queda arrastrar a Applications. Si la descarga falla, se abre la URL
         # en el navegador (el comportamiento antiguo) para no dejarle tirado.
         version = self._update_version or "latest"
-        rumps.notification(
-            "Voooxly", f"Downloading Voooxly {version}…",
-            "The menu bar icon shows progress.",
-        )
+        self._hud("The menu bar icon shows progress.", title=f"⏬ Downloading Voooxly {version}")
         try:
             path = updates.download(
                 self._update_url, version,
@@ -846,20 +890,19 @@ class VoooxlyApp(rumps.App):
             self._refresh_title()
         if path:
             subprocess.run(["open", str(path)], check=False)
-            rumps.notification(
-                "Voooxly", "Update downloaded",
+            self._alert(
+                "Update downloaded",
                 "Drag Voooxly into Applications to replace this version, then relaunch.",
             )
         else:
             subprocess.run(["open", self._update_url], check=False)
 
     def _show_stats(self, _sender):
-        rumps.notification("Voooxly", "Your dictation stats", stats.summary())
+        self._alert("Your dictation stats", stats.summary())
 
     def show_health(self, _sender):
-        h = refine.health()
-        msg = " · ".join(f"{k}: {'✓' if v else '✗'}" for k, v in h.items())
-        rumps.notification("Voooxly", "Backends", msg)
+        msg = refine.health_summary()
+        self._alert("Backend status", msg)
         self.status.title = msg
 
     def _quit(self, _sender):
@@ -881,6 +924,11 @@ class VoooxlyApp(rumps.App):
         from AppKit import NSApplication
 
         _ = NSApplication.sharedApplication()
+        # Construye ya el Controller de pynput: su __init__ consulta TIS/TSM y
+        # hacerlo luego, desde el hilo de _process, compite con el listener del
+        # hotkey y HIToolbox mata el proceso (SIGTRAP, incapturable). Aquí no hay
+        # más hilos todavía y estamos en el main thread, que es donde TSM quiere.
+        output.warmup()
         # Construye el overlay en el main thread ANTES de cualquier dictado:
         # NSPanel solo puede instanciarse aquí (AppKit lanza si se hace desde el hilo
         # del hotkey al pulsar la tecla de dictado).
@@ -908,8 +956,7 @@ class VoooxlyApp(rumps.App):
         # 0) modelo de voz: si no está, se descarga solo con progreso en el icono
         try:
             if not stt.find_model():
-                rumps.notification(
-                    "Voooxly",
+                self._alert(
                     "Downloading speech model",
                     "~550MB, one time only — the menu bar icon shows progress.",
                 )
@@ -920,10 +967,10 @@ class VoooxlyApp(rumps.App):
                 ok_model = stt.ensure_model(progress_cb=_dl_progress)
                 self._refresh_title()
                 if ok_model:
-                    rumps.notification("Voooxly", "Ready", "Speech model installed.")
+                    self._hud("Speech model installed.", title="✓ Ready")
                 else:
-                    rumps.notification(
-                        "Voooxly", "Model download failed",
+                    self._alert(
+                        "Model download failed",
                         "Check your connection and relaunch Voooxly.",
                     )
         except Exception as e:
