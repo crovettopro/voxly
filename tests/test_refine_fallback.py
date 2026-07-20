@@ -113,6 +113,34 @@ def test_preludio_de_claude_roto_cae_a_ollama_y_marca_last_fallback(monkeypatch)
     assert r.last_fallback
 
 
+def test_claude_explicito_sin_env_key_despacha_a_claude_igualmente(monkeypatch):
+    """Backend "claude" elegido explícitamente despacha SIEMPRE a _claude,
+    aunque ANTHROPIC_API_KEY no esté en el entorno (p.ej. la lectura del
+    llavero falló al arrancar). Antes, sin la variable, refine() se saltaba
+    la rama de Claude y llamaba a _ollama directamente: refinado en silencio
+    por el motor equivocado, o fallos atribuidos a Ollama. El camino
+    atribuido a Claude debe correr: _claude falla (import roto), cae a
+    _ollama, y el fallo de Ollama deja last_fallback puesto."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: (_ for _ in ()).throw(
+        requests.ConnectionError("sin red")))
+
+    llamadas_claude = []
+    original = refine.Refiner._claude
+
+    def espia(self, system, user):
+        llamadas_claude.append(True)
+        return original(self, system, user)
+
+    monkeypatch.setattr(refine.Refiner, "_claude", espia)
+    r = refine.Refiner(_cfg_claude())
+    out = r.refine("hola que tal", "ordenar", "es")
+    assert llamadas_claude, "refine() debe despachar a _claude aunque falte la env key"
+    assert out == "hola que tal"
+    assert r.last_fallback
+
+
 def test_preludio_de_claude_roto_en_modo_estricto_relanza(monkeypatch):
     """En modo estricto (usado por _probe/validate) el mismo fallo debe
     propagarse: tapar el hueco con Ollama escondería que ESTE candidato

@@ -42,7 +42,14 @@ def detect_backend(cfg=None, force: bool = False) -> str:
             f"{cfg.get('llm.ollama.host', 'http://localhost:11434')}/api/tags",
             timeout=1.5,
         )
-        if r.ok:
+        # Un Ollama alcanzable pero SIN modelo configurado NO es un proveedor:
+        # Ollama.app autoarranca su servidor, y reclamarlo aquí con
+        # llm.ollama.model vacío condenaba cada dictado a un 400 + aviso
+        # "AI didn't answer" para siempre (y la cascada nunca llegaba a una
+        # key de entorno que sí funcionara más abajo). El usuario conecta
+        # Ollama explícitamente desde el menú; hasta entonces el pegado crudo
+        # debe seguir limpio y sin avisos.
+        if r.ok and cfg.get("llm.ollama.model", ""):
             _detected = "ollama"
             return _detected
     except Exception:
@@ -116,7 +123,15 @@ class Refiner:
             backend = detect_backend(self.cfg)
         if backend == "none":
             return transcript
-        if backend == "claude" and os.environ.get("ANTHROPIC_API_KEY"):
+        if backend == "claude":
+            # Sin condicionar a que ANTHROPIC_API_KEY esté en el entorno: si el
+            # usuario eligió Claude explícitamente, el despacho va SIEMPRE a
+            # _claude. Antes, con la variable ausente (p.ej. una lectura del
+            # llavero fallida al arrancar), se caía en silencio a _ollama con el
+            # menú diciendo Claude: refinado por el motor equivocado o fallos
+            # mal atribuidos. _claude ya hace lo correcto sin key: strict
+            # relanza; si no, fallback a _ollama, cuyo propio fallo deja
+            # last_fallback puesto.
             return self._claude(sys_prompt, transcript)
         if backend == "openai":
             return self._openai(sys_prompt, transcript)
@@ -345,7 +360,11 @@ def _probe(selection, api_key: str | None, timeout: float) -> str:
     }
     if kind == "ollama":
         overrides["llm.ollama.host"] = selection.base_url
-    else:
+    elif selection.base_url:
+        # Mismo guardado que en apply_ai_selection: Claude no tiene base_url
+        # propia (base_url == "" por diseño en providers.py) y superponer
+        # llm.openai.base_url = "" aquí es el patrón exacto que ya produjo
+        # tres bugs en esta rama.
         overrides["llm.openai.base_url"] = selection.base_url
 
     r = Refiner.__new__(Refiner)

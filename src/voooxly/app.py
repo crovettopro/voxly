@@ -980,7 +980,16 @@ class VoooxlyApp(rumps.App):
 
         if prov.kind == "ollama":
             # El modelo no se presupone: se le pregunta a SU Ollama (Task 5).
-            modelos = refine.list_ollama_models(base_url or "http://localhost:11434")
+            # El host tampoco: llm.ollama.host puede venir de la config del
+            # usuario o de VOOOXLY_LLM_OLLAMA_HOST (Ollama remoto), y hay que
+            # sondear ESE host — y guardarlo como base_url de la selección,
+            # para que lo probado sea exactamente lo que queda persistido.
+            base_url = (
+                self.cfg.get("llm.ollama.host", "")
+                or base_url
+                or "http://localhost:11434"
+            )
+            modelos = refine.list_ollama_models(base_url)
             if not modelos:
                 self._alert(
                     "Ollama has no models",
@@ -1040,8 +1049,14 @@ class VoooxlyApp(rumps.App):
             self._alert(f"Couldn't connect to {prov.label}", msg)
             return
 
+        key_guardada = True
         if prov.needs_key and api_key:
-            keychain.set_key(prov.key, api_key)
+            # set_key puede devolver False (llavero que rechaza la escritura):
+            # la sesión sigue funcionando porque la key ya está exportada y
+            # validada, pero al reiniciar desaparecería en silencio. Seguimos
+            # adelante (castigar dos veces al usuario no arregla el llavero)
+            # y cambiamos el alert final por un aviso honesto.
+            key_guardada = keychain.set_key(prov.key, api_key)
         self._prefs = ai_settings.save(self._prefs, prov.key, base_url, model)
         _save_prefs(self._prefs)
         # Sin esto, hasta el siguiente reinicio la app dictaría con la config
@@ -1049,7 +1064,15 @@ class VoooxlyApp(rumps.App):
         self._apply_ai_selection(ai_settings.load(self._prefs))
         refine.detect_backend(self.cfg, force=True)
         self._update_ai_item(force=False)
-        self._alert("AI engine connected", msg)
+        if key_guardada:
+            self._alert("AI engine connected", msg)
+        else:
+            self._alert(
+                "Connected — but the key wasn't saved",
+                "Your key works for this session, but macOS Keychain refused "
+                "to store it. You'll be asked for it again after restarting "
+                "Voooxly.",
+            )
 
     def _test_ai(self, _sender):
         from . import ai_settings, keychain

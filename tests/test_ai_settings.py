@@ -68,3 +68,21 @@ def test_cargar_con_proveedor_dict_devuelve_none():
     """Otro tipo no-string corrupto también es tolerado."""
     prefs = {"ai_provider": {"nested": "dict"}}
     assert ai_settings.load(prefs) is None
+
+
+def test_save_solo_persiste_la_whitelist_y_nunca_material_de_key():
+    """Candado del criterio del spec: ninguna API key en ningún fichero bajo
+    ~/.voooxly/. save() es la única puerta de la elección de proveedor hacia
+    prefs.json: su salida debe ser EXACTAMENTE la whitelist conocida (las tres
+    CLAVE_*) más lo que ya viniera en el dict de entrada, y ningún valor puede
+    ser material de key — de hecho la firma de save() ni siquiera puede
+    recibirlo, que es lo que este test documenta con el centinela.
+    """
+    SECRETO_CENTINELA = "sk-CENTINELA-que-jamas-se-pasa-a-save"
+    prefs = ai_settings.save({}, "groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile")
+    assert set(prefs) == {
+        ai_settings.CLAVE_PROVEEDOR,
+        ai_settings.CLAVE_BASE_URL,
+        ai_settings.CLAVE_MODELO,
+    }
+    assert all(v != SECRETO_CENTINELA for v in prefs.values())
