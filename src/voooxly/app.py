@@ -185,18 +185,14 @@ class VoooxlyApp(rumps.App):
         self.status = rumps.MenuItem("Ready", callback=None)
         self.ai = rumps.MenuItem("AI engine")
         self._ai_items = {}
-        # callback=None A PROPÓSITO: los manejadores llegan en la Task 7. Hasta
-        # entonces las entradas salen deshabilitadas pero la app ARRANCA — con
-        # callbacks a métodos aún inexistentes, construir el menú petaría, y los
-        # tests no lo verían (ninguno instancia VoooxlyApp).
         for prov_key, (etiqueta, _) in zip(providers.PROVIDERS, ai_menu_labels(None)):
-            mi = rumps.MenuItem(etiqueta, callback=None)
+            mi = rumps.MenuItem(etiqueta, callback=self._make_provider_cb(prov_key))
             self.ai.add(mi)
             self._ai_items[prov_key] = mi
         self.ai.add(rumps.separator)
-        self.ai_auto_item = rumps.MenuItem("Detect automatically", callback=None)
+        self.ai_auto_item = rumps.MenuItem("Detect automatically", callback=self._reset_to_auto)
         self.ai.add(self.ai_auto_item)
-        self.ai_test_item = rumps.MenuItem("Test connection", callback=None)
+        self.ai_test_item = rumps.MenuItem("Test connection", callback=self._test_ai)
         self.ai.add(self.ai_test_item)
         self.health = rumps.MenuItem("Backend status…", callback=self.show_health)
         self.stats_item = rumps.MenuItem("Usage stats…", callback=self._show_stats)
@@ -911,16 +907,133 @@ class VoooxlyApp(rumps.App):
         self.ai.title = ai_engine_title(sel, "")
         return sel.provider.key
 
-    def _redetect_ai(self, _sender):
-        b = self._update_ai_item(force=True)
-        if b == "none":
-            self._alert(
-                "No AI engine found",
-                "Start Ollama, or add ANTHROPIC_API_KEY / OPENAI_API_KEY to "
-                "~/.voooxly/.env — then click here again.",
-            )
+    def _apply_ai_selection(self, sel) -> None:
+        """Aplica la elección al config VIVO (aquí sí toca: es configurar la app).
+
+        A diferencia de _probe(), que no debe tocar el singleton, este ES el
+        momento de escribirlo: el usuario acaba de elegir. La ruta depende del
+        kind — mismo branching que _probe y por el mismo motivo (los presets
+        OpenAI-compatibles comparten llm.openai.*).
+        """
+        if sel is None:
+            return
+        self.cfg._set_path("llm.backend", sel.provider.kind)
+        self.cfg._set_path(f"llm.{sel.provider.kind}.model", sel.model)
+        if sel.provider.kind == "ollama":
+            self.cfg._set_path("llm.ollama.host", sel.base_url)
         else:
-            self._hud(self.ai.title, title="AI engine")
+            self.cfg._set_path("llm.openai.base_url", sel.base_url)
+
+    def _make_provider_cb(self, prov_key: str):
+        def cb(_sender):
+            self._connect_provider(prov_key)
+        return cb
+
+    def _connect_provider(self, prov_key: str):
+        """Pide lo que falte, valida contra el proveedor y guarda si funciona."""
+        from . import ai_settings, keychain, providers
+
+        prov = providers.get(prov_key)
+        if prov is None:
+            return
+        base_url, model = prov.base_url, prov.default_model
+
+        if prov.kind == "ollama":
+            # El modelo no se presupone: se le pregunta a SU Ollama (Task 5).
+            modelos = refine.list_ollama_models(base_url or "http://localhost:11434")
+            if not modelos:
+                self._alert(
+                    "Ollama has no models",
+                    "Install Ollama and pull a model (for example: "
+                    "ollama pull llama3.2), then click here again.",
+                )
+                return
+            listado = "\n".join(f"• {m}" for m in modelos)
+            resp = rumps.Window(
+                message=f"Models on your Ollama:\n{listado}\n\nType the one to use:",
+                title="Choose your Ollama model",
+                default_text=modelos[0],
+                ok="Next", cancel="Cancel", dimensions=(320, 24),
+            ).run()
+            if not resp.clicked or not resp.text.strip():
+                return
+            model = resp.text.strip()
+
+        if prov.key == "custom":
+            resp = rumps.Window(
+                message="Base URL of the OpenAI-compatible endpoint:",
+                title="Custom provider",
+                default_text="https://",
+                ok="Next", cancel="Cancel", dimensions=(320, 24),
+            ).run()
+            if not resp.clicked or not resp.text.strip():
+                return
+            base_url = resp.text.strip()
+            resp = rumps.Window(
+                message="Model name:", title="Custom provider",
+                ok="Next", cancel="Cancel", dimensions=(320, 24),
+            ).run()
+            if not resp.clicked or not resp.text.strip():
+                return
+            model = resp.text.strip()
+
+        api_key = None
+        if prov.needs_key:
+            api_key = keychain.get_key(prov.key)
+            resp = rumps.Window(
+                message=f"API key for {prov.label}:",
+                title="Connect AI engine",
+                ok="Connect", cancel="Cancel",
+                dimensions=(320, 24), secure=True,
+            ).run()
+            if not resp.clicked:
+                return
+            if resp.text.strip():
+                api_key = resp.text.strip()
+            if not api_key:
+                self._alert("No API key", f"{prov.label} needs a key to work.")
+                return
+
+        sel = ai_settings.Selection(prov, base_url, model)
+        ok, msg = refine.validate(sel, api_key)
+        if not ok:
+            self._alert(f"Couldn't connect to {prov.label}", msg)
+            return
+
+        if prov.needs_key and api_key:
+            keychain.set_key(prov.key, api_key)
+        self._prefs = ai_settings.save(self._prefs, prov.key, base_url, model)
+        _save_prefs(self._prefs)
+        # Sin esto, hasta el siguiente reinicio la app dictaría con la config
+        # vieja: prefs.json solo se lee al arrancar. "Connected ✓" y luego nada.
+        self._apply_ai_selection(ai_settings.load(self._prefs))
+        refine.detect_backend(self.cfg, force=True)
+        self._update_ai_item(force=False)
+        self._alert("AI engine connected", msg)
+
+    def _test_ai(self, _sender):
+        from . import ai_settings, keychain
+
+        sel = ai_settings.load(self._prefs)
+        if sel is None:
+            self._alert("No AI engine selected", "Pick one from the AI engine menu first.")
+            return
+        api_key = keychain.get_key(sel.provider.key) if sel.provider.needs_key else None
+        ok, msg = refine.validate(sel, api_key)
+        self._alert("Connection OK" if ok else "Connection failed", msg)
+
+    def _reset_to_auto(self, _sender):
+        """Devuelve el control a la cascada de auto-detección."""
+        from . import ai_settings
+
+        for clave in (ai_settings.CLAVE_PROVEEDOR, ai_settings.CLAVE_BASE_URL,
+                      ai_settings.CLAVE_MODELO):
+            self._prefs.pop(clave, None)
+        _save_prefs(self._prefs)
+        self.cfg._set_path("llm.backend", "auto")
+        b = refine.detect_backend(self.cfg, force=True)
+        self._update_ai_item(force=False)
+        self._alert("Back to automatic", f"Detected: {b}.")
 
     def _open_update(self, _sender):
         if not self._update_url or self._update_downloading:
@@ -983,6 +1096,20 @@ class VoooxlyApp(rumps.App):
         # hotkey y HIToolbox mata el proceso (SIGTRAP, incapturable). Aquí no hay
         # más hilos todavía y estamos en el main thread, que es donde TSM quiere.
         output.warmup()
+        # La key vive en el llavero; los backends la leen de os.environ. Sin este
+        # puente la conexión se pierde en cada reinicio.
+        try:
+            from . import ai_settings, keychain
+
+            sel = ai_settings.load(self._prefs)
+            if sel and sel.provider.needs_key:
+                refine.export_key(sel, keychain.get_key(sel.provider.key))
+            # Mismo helper que usa _connect_provider: escribir llm.openai.base_url
+            # incondicionalmente aquí era el mismo bug de rutas por kind que la
+            # revisión cazó en _probe (Task 4), repetido en el arranque.
+            self._apply_ai_selection(sel)
+        except Exception:
+            log.warning("No pude restaurar el proveedor guardado", exc_info=True)
         # Construye el overlay en el main thread ANTES de cualquier dictado:
         # NSPanel solo puede instanciarse aquí (AppKit lanza si se hace desde el hilo
         # del hotkey al pulsar la tecla de dictado).
