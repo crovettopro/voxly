@@ -351,18 +351,54 @@ def _probe(selection, api_key: str | None, timeout: float) -> str:
     return r._openai("Reply with the single word OK.", "ping")
 
 
+def _env_key_for(selection) -> str | None:
+    """Variable de entorno que _probe (vía export_key) toca para este kind.
+
+    None para ollama: no hay key de por medio, nada que restaurar.
+    """
+    kind = selection.provider.kind
+    if kind == "claude":
+        return "ANTHROPIC_API_KEY"
+    if kind == "ollama":
+        return None
+    from .config import get_config
+
+    return get_config().get("llm.openai.api_key_env", "OPENAI_API_KEY")
+
+
 def validate(selection, api_key: str | None, timeout: float = 12.0) -> tuple[bool, str]:
     """Comprueba de verdad que el proveedor refina. Devuelve (ok, mensaje)."""
     if selection.provider.needs_key and not api_key:
         return False, f"{selection.provider.label} needs an API key."
     if not selection.model:
         return False, f"Pick a model for {selection.provider.label}."
+    # _probe() exporta la key candidata a os.environ ANTES de generar (los
+    # backends la leen de ahí). Si la validación falla, esa key rechazada se
+    # queda en el entorno y sesga la próxima detect_backend() (su cascada solo
+    # mira PRESENCIA de la variable, no si la key funciona). Snapshot + restore
+    # deja el entorno como estaba en cualquier fallo; en éxito la dejamos
+    # puesta, porque acaba de demostrar que funciona.
+    env_key = _env_key_for(selection)
+    prev = os.environ.get(env_key) if env_key else None
+    had_prev = env_key is not None and env_key in os.environ
+
+    def _restore_env():
+        if not env_key:
+            return
+        if had_prev:
+            os.environ[env_key] = prev
+        else:
+            os.environ.pop(env_key, None)
+
     try:
         salida = _probe(selection, api_key, timeout)
     except ModelNotAvailable as e:
+        _restore_env()
         return False, f"Model “{selection.model}” isn't available: {e}"
     except Exception as e:
+        _restore_env()
         return False, f"Couldn't reach {selection.provider.label}: {e}"
     if not (salida or "").strip():
+        _restore_env()
         return False, f"{selection.provider.label} answered, but with nothing usable."
     return True, f"Connected to {selection.provider.label} using {selection.model}."

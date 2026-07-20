@@ -1,6 +1,7 @@
 """validate() manda una generación real y traduce el fallo a algo legible."""
 
 import copy
+import os
 
 import pytest
 
@@ -372,3 +373,56 @@ def test_dictado_en_vivo_sigue_devolviendo_transcripcion_si_ollama_falla(monkeyp
     assert r.strict is False
     salida = r._ollama("system", "transcripción cruda del usuario")
     assert salida == "transcripción cruda del usuario"
+
+
+# --- Hallazgo 6: una key rechazada no puede quedarse en os.environ ---
+#
+# _probe() llama a export_key(selection, api_key) ANTES de generar, porque
+# _openai()/_claude() leen la key del entorno. Si la validación falla, nada
+# la quitaba: detect_backend() sólo mira PRESENCIA de la variable, así que una
+# key recién rechazada sesgaba la próxima auto-detección hacia el proveedor
+# que acababa de fallar.
+
+
+def _sel_openai(model="gpt-4o-mini"):
+    prov = providers.get("openai")
+    return ai_settings.Selection(provider=prov, base_url=prov.base_url, model=model)
+
+
+def test_falla_restaura_ausencia_previa_de_la_env_var(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def sin_red(*a, **k):
+        raise refine.requests.ConnectionError("nope")
+
+    monkeypatch.setattr(refine.requests, "post", sin_red)
+
+    ok, _ = refine.validate(_sel_openai(), "sk-new-bad-key")
+
+    assert ok is False
+    assert "OPENAI_API_KEY" not in os.environ
+
+
+def test_falla_restaura_el_valor_previo_de_la_env_var(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-old-working")
+
+    def sin_red(*a, **k):
+        raise refine.requests.ConnectionError("nope")
+
+    monkeypatch.setattr(refine.requests, "post", sin_red)
+
+    ok, _ = refine.validate(_sel_openai(), "sk-new-bad-key")
+
+    assert ok is False
+    assert os.environ.get("OPENAI_API_KEY") == "sk-old-working"
+
+
+def test_exito_deja_puesta_la_key_nueva(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    resp = _FakeResp(200, {"choices": [{"message": {"content": "OK"}}]})
+    monkeypatch.setattr(refine.requests, "post", lambda *a, **k: resp)
+
+    ok, _ = refine.validate(_sel_openai(), "sk-new-working")
+
+    assert ok is True
+    assert os.environ.get("OPENAI_API_KEY") == "sk-new-working"

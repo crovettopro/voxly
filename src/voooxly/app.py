@@ -91,6 +91,33 @@ def ai_engine_title(selection, detected: str) -> str:
     return f"AI engine — {label} (auto)"
 
 
+def apply_ai_selection(cfg, sel) -> None:
+    """Aplica la elección al config VIVO (aquí sí toca: es configurar la app).
+
+    A nivel de módulo y no como método para poder testearla sin instanciar
+    VoooxlyApp (mismo motivo que ai_menu_labels/ai_engine_title: AppKit no
+    corre en pytest).
+
+    A diferencia de _probe(), que no debe tocar el singleton, este ES el
+    momento de escribirlo: el usuario acaba de elegir. La ruta depende del
+    kind — mismo branching que _probe y por el mismo motivo (los presets
+    OpenAI-compatibles comparten llm.openai.*).
+    """
+    if sel is None:
+        return
+    cfg._set_path("llm.backend", sel.provider.kind)
+    cfg._set_path(f"llm.{sel.provider.kind}.model", sel.model)
+    if sel.provider.kind == "ollama":
+        cfg._set_path("llm.ollama.host", sel.base_url)
+    elif sel.base_url:
+        # Claude no tiene base_url propia (el SDK de anthropic gestiona su
+        # endpoint solo, base_url == "" por diseño en providers.py): escribir
+        # aquí incondicionalmente dejaba llm.openai.base_url = "" en vivo cada
+        # vez que se conectaba o restauraba Claude, rompiendo la ruta
+        # OpenAI-compatible hasta el próximo proveedor openai-kind conectado.
+        cfg._set_path("llm.openai.base_url", sel.base_url)
+
+
 class VoooxlyApp(rumps.App):
     def __init__(self):
         cfg = get_config()
@@ -908,21 +935,9 @@ class VoooxlyApp(rumps.App):
         return sel.provider.key
 
     def _apply_ai_selection(self, sel) -> None:
-        """Aplica la elección al config VIVO (aquí sí toca: es configurar la app).
-
-        A diferencia de _probe(), que no debe tocar el singleton, este ES el
-        momento de escribirlo: el usuario acaba de elegir. La ruta depende del
-        kind — mismo branching que _probe y por el mismo motivo (los presets
-        OpenAI-compatibles comparten llm.openai.*).
-        """
-        if sel is None:
-            return
-        self.cfg._set_path("llm.backend", sel.provider.kind)
-        self.cfg._set_path(f"llm.{sel.provider.kind}.model", sel.model)
-        if sel.provider.kind == "ollama":
-            self.cfg._set_path("llm.ollama.host", sel.base_url)
-        else:
-            self.cfg._set_path("llm.openai.base_url", sel.base_url)
+        """Delegado fino: la lógica vive en apply_ai_selection (nivel de
+        módulo) para poder testearla sin instanciar VoooxlyApp."""
+        apply_ai_selection(self.cfg, sel)
 
     def _make_provider_cb(self, prov_key: str):
         def cb(_sender):
