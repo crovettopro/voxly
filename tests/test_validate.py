@@ -185,3 +185,101 @@ def test_probe_openai_apunta_al_base_url_del_candidato(monkeypatch):
     )
     refine._probe(sel, None, 5.0)
     assert llamadas and llamadas[0].startswith("https://candidate.example/v1")
+
+
+# --- Hallazgo 4: el probe no puede taparse con el fallback de dictado en vivo ---
+#
+# _openai() y _claude() caen a Ollama si el backend remoto falla — correcto
+# para un dictado real, donde el usuario prefiere texto sin refinar a nada.
+# Pero _probe() reutiliza esos mismos métodos: sin modo estricto, un candidato
+# openai/claude roto (key inválida, sin red, base_url que no existe) caía al
+# Ollama YA CONFIGURADO en la máquina, que respondía bien, y validate() daba
+# éxito nombrando un proveedor que en realidad nunca contestó. Ninguno de
+# estos tests monkeypatchea _probe: ejercitan _openai/_claude de verdad contra
+# un requests.post fake, igual que los de "Hallazgo 1".
+
+
+def test_probe_openai_que_falla_no_cae_al_ollama_configurado(monkeypatch):
+    """Sin el modo estricto, esta prueba fallaría: fake_post respondería "OK"
+    en la segunda llamada (el fallback a Ollama) y validate() devolvería
+    éxito para un candidato que en realidad devolvió 401."""
+    llamadas = []
+
+    def fake_post(url, **kwargs):
+        llamadas.append(url)
+        if "candidate.example" in url:
+            raise Exception("401 unauthorized")
+        # Si esto llega a llamarse es porque el fallback a Ollama se coló:
+        # responde bien a propósito para demostrar que taparía el fallo.
+        return _FakeResp(200, {"message": {"content": "OK"}})
+
+    monkeypatch.setattr(refine.requests, "post", fake_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-bad-key")
+
+    sel = ai_settings.Selection(
+        provider=providers.get("openai"),
+        base_url="https://candidate.example/v1",
+        model="gpt-4o-mini",
+    )
+    ok, msg = refine.validate(sel, "sk-bad-key", timeout=5.0)
+    assert ok is False
+    # Sólo la llamada al candidato: si el fallback se hubiera colado habría
+    # una segunda llamada (al host de Ollama).
+    assert llamadas == ["https://candidate.example/v1/chat/completions"]
+
+
+def test_probe_claude_que_falla_no_cae_al_ollama_configurado(monkeypatch):
+    """Misma idea con kind="claude": _claude() usa el SDK de anthropic, no
+    requests.post directamente, así que la key inválida se simula ahí. El
+    requests.post fake queda para demostrar que el fallback a Ollama (si se
+    colara) respondería bien y taparía el fallo."""
+    import anthropic
+
+    llamadas = []
+
+    def fake_post(url, **kwargs):
+        llamadas.append(url)
+        return _FakeResp(200, {"message": {"content": "OK"}})
+
+    monkeypatch.setattr(refine.requests, "post", fake_post)
+
+    class _ClienteQueFalla:
+        class messages:
+            @staticmethod
+            def create(**kwargs):
+                raise Exception("401 invalid x-api-key")
+
+    monkeypatch.setattr(anthropic, "Anthropic", lambda: _ClienteQueFalla())
+
+    sel = ai_settings.Selection(
+        provider=providers.get("claude"),
+        base_url=providers.get("claude").base_url,
+        model="claude-sonnet-5",
+    )
+    ok, msg = refine.validate(sel, "clave-invalida", timeout=5.0)
+    assert ok is False
+    # Ninguna llamada a requests.post: si el fallback a Ollama se hubiera
+    # colado, habría una (y encima respondería "OK", tapando el fallo).
+    assert llamadas == []
+
+
+def test_dictado_en_vivo_sigue_cayendo_a_ollama_si_openai_falla(monkeypatch):
+    """El Refiner normal (el que usa app.py para dictar) NO es estricto: si el
+    backend remoto falla en mitad de un dictado, el usuario debe seguir
+    recibiendo texto (sin refinar) en vez de nada."""
+    llamadas = []
+
+    def fake_post(url, **kwargs):
+        llamadas.append(url)
+        if "api.openai.com" in url:
+            raise Exception("network fail")
+        return _FakeResp(200, {"message": {"content": "texto refinado por ollama"}})
+
+    monkeypatch.setattr(refine.requests, "post", fake_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-key")
+
+    r = refine.Refiner(_FakeCfg({"llm.backend": "openai"}))
+    assert r.strict is False
+    salida = r._openai("system", "user")
+    assert salida == "texto refinado por ollama"
+    assert len(llamadas) == 2

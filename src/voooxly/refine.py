@@ -62,6 +62,15 @@ class Refiner:
     def __init__(self, cfg):
         self.cfg = cfg
         self.backend = cfg.get("llm.backend", "auto")
+        # Modo estricto: sólo lo activa _probe (ver abajo). Con strict=False
+        # (siempre en dictado real, vía app.py), _openai/_claude conservan su
+        # fallback a Ollama si el backend remoto falla — así el usuario nunca
+        # se queda sin texto en mitad de un dictado. En modo estricto ese
+        # fallback se desactiva y el error real se relanza, porque _probe
+        # necesita saber si EL CANDIDATO responde, no si Ollama responde en
+        # su lugar (si no, validate() podía devolver éxito para un proveedor
+        # que nunca contestó — el propio Ollama ya configurado tapaba el fallo).
+        self.strict = False
 
     def refine(self, transcript: str, mode: str, language: str | None) -> str:
         transcript = (transcript or "").strip()
@@ -159,6 +168,8 @@ class Refiner:
             )
             return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
         except Exception as e:
+            if self.strict:
+                raise
             log.error("Claude falló (%s). Fallback Ollama.", e)
             return self._ollama(system, user)
 
@@ -171,6 +182,11 @@ class Refiner:
         temp = self.cfg.get("llm.openai.temperature", 0.3)
         timeout = self.cfg.get("llm.openai.timeout", 30)
         if not key:
+            if self.strict:
+                # Mismo motivo que en el except de abajo: en modo probe, "no hay
+                # key" es un fallo del candidato, no una señal para tapar el
+                # hueco con Ollama.
+                raise RuntimeError(f"missing {env_key}")
             log.warning("Sin %s. Fallback Ollama.", env_key)
             return self._ollama(system, user)
         try:
@@ -190,6 +206,8 @@ class Refiner:
             r.raise_for_status()
             return (r.json()["choices"][0]["message"]["content"] or "").strip()
         except Exception as e:
+            if self.strict:
+                raise
             log.error("OpenAI falló (%s). Fallback Ollama.", e)
             return self._ollama(system, user)
 
@@ -293,6 +311,11 @@ def _probe(selection, api_key: str | None, timeout: float) -> str:
     r = Refiner.__new__(Refiner)
     r.cfg = _CandidateConfig(get_config(), overrides)
     r.backend = kind
+    # Sin esto, un candidato openai/claude roto cae al fallback de Ollama de
+    # _openai()/_claude() y, si el Ollama YA CONFIGURADO en la máquina del
+    # usuario responde bien (lo normal), validate() da éxito nombrando un
+    # proveedor que en realidad nunca contestó.
+    r.strict = True
     if kind == "ollama":
         return r._ollama("Reply with the single word OK.", "ping")
     if kind == "claude":
