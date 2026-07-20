@@ -19,7 +19,7 @@ import time
 
 import rumps
 
-from . import audio, dictionary, history, media, modes, output, refine, richtext, setup_checks, stats, stt, updates
+from . import audio, dictionary, history, media, modes, output, providers, refine, richtext, setup_checks, stats, stt, updates
 from .config import get_config, resolve_language
 from .hotkey import HotkeyManager
 from .overlay import Overlay
@@ -52,6 +52,22 @@ def _save_prefs(prefs: dict) -> None:
             json.dump(prefs, f, indent=2)
     except Exception:
         log.warning("No pude guardar prefs en %s", PREFS_PATH)
+
+
+def ai_menu_labels(selection) -> list[tuple[str, bool]]:
+    """Filas del submenú AI engine: (etiqueta, ¿es el activo?).
+
+    A nivel de módulo y no como método para poder testearla: instanciar
+    VoooxlyApp construye menús de AppKit y eso no corre en un test.
+    """
+    filas = []
+    for prov in providers.PROVIDERS.values():
+        # Todas abren un diálogo (key, URL/modelo de custom, o el selector de
+        # modelos de Ollama): "…" en todas, por convención de macOS.
+        etiqueta = f"{prov.label}…"
+        activo = selection is not None and selection.provider.key == prov.key
+        filas.append((etiqueta, activo))
+    return filas
 
 
 class VoooxlyApp(rumps.App):
@@ -146,7 +162,21 @@ class VoooxlyApp(rumps.App):
         self.mode_items = {key: mi for (key, _), mi in zip(modes.modes_by_key().items(), items)}
 
         self.status = rumps.MenuItem("Ready", callback=None)
-        self.ai = rumps.MenuItem("AI: detecting…", callback=self._redetect_ai)
+        self.ai = rumps.MenuItem("AI engine")
+        self._ai_items = {}
+        # callback=None A PROPÓSITO: los manejadores llegan en la Task 7. Hasta
+        # entonces las entradas salen deshabilitadas pero la app ARRANCA — con
+        # callbacks a métodos aún inexistentes, construir el menú petaría, y los
+        # tests no lo verían (ninguno instancia VoooxlyApp).
+        for prov_key, (etiqueta, _) in zip(providers.PROVIDERS, ai_menu_labels(None)):
+            mi = rumps.MenuItem(etiqueta, callback=None)
+            self.ai.add(mi)
+            self._ai_items[prov_key] = mi
+        self.ai.add(rumps.separator)
+        self.ai_auto_item = rumps.MenuItem("Detect automatically", callback=None)
+        self.ai.add(self.ai_auto_item)
+        self.ai_test_item = rumps.MenuItem("Test connection", callback=None)
+        self.ai.add(self.ai_test_item)
         self.health = rumps.MenuItem("Backend status…", callback=self.show_health)
         self.stats_item = rumps.MenuItem("Usage stats…", callback=self._show_stats)
         self.quit = rumps.MenuItem("Quit Voooxly", callback=self._quit)
@@ -847,15 +877,15 @@ class VoooxlyApp(rumps.App):
             output.paste_frontmost()
 
     def _update_ai_item(self, force: bool = True) -> str:
-        b = refine.detect_backend(self.cfg, force=force)
-        labels = {
-            "ollama": "AI: Ollama ✓",
-            "claude": "AI: Claude API ✓",
-            "openai": "AI: OpenAI-compatible ✓",
-            "none": "AI: none — pasting raw text",
-        }
-        self.ai.title = labels.get(b, f"AI: {b}")
-        return b
+        """Marca el proveedor activo en el submenú. Devuelve su clave."""
+        from . import ai_settings
+
+        sel = ai_settings.load(self._prefs)
+        for prov_key, mi in self._ai_items.items():
+            mi.state = 1 if (sel and sel.provider.key == prov_key) else 0
+        if sel is None:
+            return refine.detect_backend(self.cfg, force=force)
+        return sel.provider.key
 
     def _redetect_ai(self, _sender):
         b = self._update_ai_item(force=True)
