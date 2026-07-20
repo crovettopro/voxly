@@ -121,7 +121,7 @@ class Refiner:
     # --- Ollama ---
     def _ollama(self, system: str, user: str) -> str:
         host = self.cfg.get("llm.ollama.host", "http://localhost:11434")
-        model = self.cfg.get("llm.ollama.model", "glm-5.2:cloud")
+        model = self.cfg.get("llm.ollama.model", "")
         temp = self.cfg.get("llm.ollama.temperature", 0.3)
         timeout = self.cfg.get("llm.ollama.timeout", 30)
         try:
@@ -355,6 +355,8 @@ def validate(selection, api_key: str | None, timeout: float = 12.0) -> tuple[boo
     """Comprueba de verdad que el proveedor refina. Devuelve (ok, mensaje)."""
     if selection.provider.needs_key and not api_key:
         return False, f"{selection.provider.label} needs an API key."
+    if not selection.model:
+        return False, f"Pick a model for {selection.provider.label}."
     try:
         salida = _probe(selection, api_key, timeout)
     except ModelNotAvailable as e:

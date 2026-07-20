@@ -67,6 +67,29 @@ def test_falla_si_el_proveedor_pide_key_y_no_hay():
     assert "key" in msg.lower()
 
 
+def test_falla_si_no_hay_modelo_elegido():
+    """Con modelo vacío (p.ej. tras borrar la key de config.yaml) el mensaje
+    debe pedir elegir un modelo, nunca hablar de "reach"/"connect" — ese
+    texto llevaba al usuario a depurar su red por un modelo sin elegir."""
+    ok, msg = refine.validate(seleccion(model=""), None)
+    assert ok is False
+    assert "model" in msg.lower()
+    assert "reach" not in msg.lower()
+    assert "connect" not in msg.lower()
+
+
+def test_falla_si_no_hay_modelo_no_hace_ninguna_peticion(monkeypatch):
+    """El guard tiene que cortar ANTES de _probe(): sin modelo no debe salir
+    ninguna petición HTTP."""
+    llamadas = []
+    monkeypatch.setattr(
+        refine.requests, "post", lambda *a, **k: llamadas.append(a or k) or None
+    )
+    ok, _ = refine.validate(seleccion(model=""), None)
+    assert ok is False
+    assert llamadas == []
+
+
 def test_falla_legible_si_no_hay_red(monkeypatch):
     import requests
 
