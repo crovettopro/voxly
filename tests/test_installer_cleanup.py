@@ -60,3 +60,16 @@ def test_ignores_other_peoples_installers():
 def test_survives_an_empty_or_odd_plist():
     assert ic.parse_hdiutil_info({}) == []
     assert ic.parse_hdiutil_info({"images": [{"system-entities": []}]}) == []
+
+
+def test_offers_from_an_installed_copy():
+    assert ic.should_offer({}, "/Applications/Voooxly.app") is True
+
+
+def test_stays_quiet_when_running_from_the_dmg_or_a_dev_checkout():
+    assert ic.should_offer({}, "/Volumes/Voooxly 1/Voooxly.app") is False
+    assert ic.should_offer({}, "/Users/someone/Desktop/code-edu/voooxly") is False
+
+
+def test_never_asks_twice():
+    assert ic.should_offer({ic.PREF_KEY: True}, "/Applications/Voooxly.app") is False
