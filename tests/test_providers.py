@@ -53,9 +53,9 @@ def test_los_presets_con_url_fija_la_traen_rellena():
 
 
 def test_ollama_es_el_ultimo_para_de_enfatizarlo_en_el_menu():
-    # El orden de inserción ES el del menú: cloud primero, Ollama al final.
+    # El orden de inserción ES el del menú: el gratis primero, Ollama al final.
     orden = list(providers.PROVIDERS)
-    assert orden[0] == "claude"
+    assert orden[0] == "groq"
     assert orden[-1] == "ollama"
 
 
@@ -66,3 +66,25 @@ def test_proveedor_desconocido_da_none():
 def test_todas_las_etiquetas_son_distintas():
     labels = [p.label for p in providers.PROVIDERS.values()]
     assert len(labels) == len(set(labels))
+
+
+def test_groq_va_primero_y_dice_que_es_gratis():
+    # Es el único gratis de la lista: ponerlo detrás de tres de pago hacía
+    # que nadie lo encontrara, que es justo la vía más rápida para probar la
+    # IA sin sacar la tarjeta.
+    from voooxly import providers
+    assert list(providers.PROVIDERS)[0] == "groq"
+    assert providers.PROVIDERS["groq"].note == "free"
+    assert "free" in providers.PROVIDERS["groq"].label.lower()
+
+
+def test_ollama_sigue_siendo_el_ultimo():
+    from voooxly import providers
+    assert list(providers.PROVIDERS)[-1] == "ollama"
+
+
+def test_los_demas_proveedores_no_dicen_que_son_gratis():
+    from voooxly import providers
+    for k, p in providers.PROVIDERS.items():
+        if k != "groq":
+            assert p.note == "", f"{k} no es gratis"

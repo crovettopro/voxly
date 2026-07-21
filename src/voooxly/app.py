@@ -794,6 +794,14 @@ class VoooxlyApp(rumps.App):
             self._last_result = final
             self._push_history(final)
             stats.bump(len(final.split()), duration)
+            # Tokens del LLM remoto, si lo hubo. getattr porque en fast-lane
+            # refiner es None — el mismo patrón que el aviso de last_fallback.
+            usados = getattr(refiner, "last_usage", None)
+            if usados:
+                from . import ai_settings
+
+                sel = ai_settings.load(self._prefs)
+                stats.bump_tokens(usados, sel.provider.label if sel else "")
             log.info("Final (+%.1fs): %s", time.monotonic() - t0, final)
             # 3) entregar
             auto_paste = bool(self.cfg.get("output.auto_paste", True))

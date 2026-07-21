@@ -8,7 +8,7 @@ requiere tocar refine.py.
 Lista curada y corta a propósito (MVP): los más comunes y que mejor rinden para
 limpiar dictado, más Ollama como única opción local. El orden es el del menú
 (orden de inserción): cloud primero, Ollama el último porque la mayoría de la
-gente no corre modelos en su propia máquina.
+gente no corre modelos en su propia máquina, el gratis el primero de todos.
 """
 from __future__ import annotations
 
@@ -23,9 +23,22 @@ class Provider:
     default_model: str
     needs_key: bool
     kind: str  # "ollama" | "claude" | "openai"
+    note: str = ""  # "free" → se muestra en el menú; el resto, vacío
 
 
 PROVIDERS: dict[str, Provider] = {
+    # Groq primero: es el único gratis de la lista y la vía más rápida para
+    # probar el refinado sin sacar la tarjeta. Detrás de tres de pago no lo
+    # encontraba nadie.
+    "groq": Provider(
+        key="groq",
+        label="Groq — free",
+        base_url="https://api.groq.com/openai/v1",
+        default_model="llama-3.3-70b-versatile",
+        needs_key=True,
+        kind="openai",
+        note="free",
+    ),
     "claude": Provider(
         key="claude",
         label="Claude",
@@ -48,14 +61,6 @@ PROVIDERS: dict[str, Provider] = {
         # Endpoint OpenAI-compatible de Gemini: mismo camino que openai/groq.
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         default_model="gemini-2.0-flash",
-        needs_key=True,
-        kind="openai",
-    ),
-    "groq": Provider(
-        key="groq",
-        label="Groq",
-        base_url="https://api.groq.com/openai/v1",
-        default_model="llama-3.3-70b-versatile",
         needs_key=True,
         kind="openai",
     ),

@@ -102,10 +102,15 @@ class Refiner:
         # causa si el resultado final fue la transcripción cruda POR UN FALLO.
         # Los caminos deliberados (literal, backend "none") no lo tocan.
         self.last_fallback: str | None = None
+        # Tokens de la última llamada al LLM remoto, o None si no la hubo
+        # (fast-lane, modo literal, backend "none", Ollama). Lo lee app.py
+        # para las stats. Ollama no cuenta: es local y no gasta cuota.
+        self.last_usage: int | None = None
 
     def refine(self, transcript: str, mode: str, language: str | None) -> str:
         transcript = (transcript or "").strip()
         self.last_fallback = None
+        self.last_usage = None
         if not transcript:
             return ""
         sys_prompt = modes.system_prompt(mode, language)
@@ -221,6 +226,15 @@ class Refiner:
                 messages=[{"role": "user", "content": user}],
                 timeout=timeout,
             )
+            # getattr en cascada, nunca acceso directo: esto vive DENTRO del
+            # try que hace fallback a Ollama, así que un AttributeError aquí
+            # (un SDK que renombre `usage`) haría que una llamada a Claude que
+            # funcionó perfectamente se reintentara contra Ollama. Contar
+            # tokens no puede alterar el refinado.
+            usage = getattr(resp, "usage", None)
+            entrada = getattr(usage, "input_tokens", 0) or 0
+            salida = getattr(usage, "output_tokens", 0) or 0
+            self.last_usage = (entrada + salida) or None
             return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
         except Exception as e:
             if self.strict:
@@ -259,7 +273,12 @@ class Refiner:
                 timeout=timeout,
             )
             r.raise_for_status()
-            return (r.json()["choices"][0]["message"]["content"] or "").strip()
+            data = r.json()
+            # `usage` es opcional en el protocolo: un proveedor que no lo
+            # mande no puede romper el dictado, solo se queda sin contar.
+            usage = data.get("usage") or {}
+            self.last_usage = usage.get("total_tokens") or None
+            return (data["choices"][0]["message"]["content"] or "").strip()
         except Exception as e:
             if self.strict:
                 raise
