@@ -255,37 +255,47 @@ Everything lives in `config.yaml`, with `.env` overrides (see `.env.example`).
 | `llm.custom_rules` | — | Free-text style rules appended to every mode |
 | `app.language` | `null` | Output language; `null` keeps whatever you spoke |
 
-**Voooxly does not pick an AI for you and has no favourite.** Whichever
-provider you connect is the one it uses, and `llm.ollama.model` ships empty on
-purpose — a baked-in default would presume which model you happen to have, and
-a cloud-only one would quietly fail for anyone without that subscription while
-still reporting "connected".
+### Choosing a model
 
-`VOOOXLY_LLM_BACKEND` selects the *transport*, not the vendor: `ollama` |
-`claude` | `openai` | `none`. Most providers speak the OpenAI protocol, so
-`openai` is the value you want for anything that isn't Ollama or Claude — set
-`base_url` and `api_key_env` to point it wherever you like:
+**Voooxly has no favourite model and doesn't ship one.** `llm.ollama.model`
+starts empty on purpose: a baked-in default would presume which model you
+happen to have, and a cloud-only one would quietly fail for anyone without
+that subscription while still reporting "connected". You choose, and you can
+change your mind whenever.
+
+**The free route is Groq.** A free API key, no card, and it handles dictation
+cleanup perfectly well — it's first in the **AI engine** menu for that reason.
+If you don't already pay for an AI, this is the one to take.
+
+Beyond that, you have as many models as your provider offers:
+
+- **Any provider in the menu** — Groq, Claude, OpenAI or Gemini. Paste a key
+  and it starts working immediately. To use a different model from that same
+  provider, edit `config.yaml`: Claude reads `llm.claude.model`, and everything
+  OpenAI-compatible (including Groq and Gemini) reads `llm.openai.model`.
+- **Ollama, running locally** — pull whatever model you like and Voooxly asks
+  *your* server which ones you have, then lets you pick from that list. No key,
+  and nothing leaves your Mac.
+- **Ollama's cloud models** — same menu, same list. If you have an Ollama
+  subscription, its cloud models show up alongside your local ones and work
+  the same way.
+- **Anything else that speaks the OpenAI protocol** — OpenRouter, DeepSeek,
+  Mistral, Together AI, xAI and the rest have no menu entry, but they only
+  need three lines:
 
 ```yaml
-# config.yaml — any OpenAI-compatible provider
+# config.yaml
 llm:
-  backend: openai
+  backend: openai          # the transport, not the vendor
   openai:
     base_url: "https://<provider>/v1"
     model: "<the model you want>"
     api_key_env: "MY_PROVIDER_KEY"
 ```
 
-That covers the providers with no menu entry — OpenRouter, DeepSeek, Mistral,
-Together AI, xAI and the rest. If you just want something that works without
-paying, Groq's free key does the job and is two clicks from the menu bar.
-
-Or fully local, no key at all — pull whichever model you prefer and name it:
-
-```bash
-ollama pull <model>
-# config.yaml → llm.ollama.model: "<model>"
-```
+More providers and models will land in the menu over time. The list above is
+what's wired today — the `openai` transport already reaches almost anything
+else in the meantime.
 
 ### Architecture
 
