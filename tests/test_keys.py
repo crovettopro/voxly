@@ -89,6 +89,19 @@ def test_un_modificador_sin_lado_se_rechaza():
         assert "_l" in msg or "_r" in msg, "el error tiene que decir cómo arreglarlo"
 
 
+def test_el_mensaje_de_modificador_sin_lado_no_afirma_algo_falso():
+    # En macOS "cmd" a secas SOLO casa con la tecla izquierda (pynput colapsa
+    # Key.cmd_l en Key.cmd), nunca con las dos. El mensaje anterior decía que
+    # "casaría con las dos" — falso — y encima recomendaba "cmd_l" como
+    # arreglo, que hotkey._canon canonicaliza de vuelta a "cmd". El mensaje
+    # tiene que orientar sin afirmar un comportamiento que no existe.
+    for n in ("cmd", "ctrl", "alt"):
+        _, msg = keys.validate_custom(n)
+        bajo = msg.lower()
+        assert "both" not in bajo, f'el mensaje de "{n}" sigue afirmando que casa con las dos'
+        assert f"{n}_l" in msg and f"{n}_r" in msg
+
+
 def test_un_nombre_que_pynput_no_conoce_se_rechaza():
     # Aceptarlo daría una tecla que no dispara nunca: fallo mudo, lo peor.
     assert keys.validate_custom("tecla_inventada")[0] is False
@@ -100,12 +113,16 @@ def test_una_funcion_alta_se_acepta_sin_guarda():
     assert keys.needs_guard("f18") is False
 
 
-def test_un_modificador_fuera_del_catalogo_se_acepta_con_guarda():
-    # alt_gr existe en pynput y no está en el menú, pero sigue siendo un
-    # modificador: se usa en combos, así que necesita guarda igual.
+def test_alt_gr_se_acepta_y_no_lleva_guarda_porque_es_alt_r():
+    # alt_gr no está en el menú pero pynput lo colapsa en el mismo miembro
+    # de enum que alt_r (Key.alt_gr is Key.alt_r en macOS: no hay una tecla
+    # AltGr física distinta de la Option derecha). Tratarla como "un
+    # modificador cualquiera" y ponerle guarda sería incoherente con que el
+    # catálogo ya trata las derechas — que es lo que alt_gr ES de verdad —
+    # sin guarda.
     ok, _ = keys.validate_custom("alt_gr")
     assert ok is True
-    assert keys.needs_guard("alt_gr") is True
+    assert keys.needs_guard("alt_gr") is False
 
 
 def test_resolve_usa_prefs_por_encima_del_yaml():

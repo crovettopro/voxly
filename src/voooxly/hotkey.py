@@ -84,13 +84,27 @@ _ALIAS_IZQUIERDA = {
     "shift_l": "shift",
 }
 
+# GOTCHA aparte (mismo mecanismo del enum de arriba, pero no es un alias de
+# IZQUIERDA): alt_gr tampoco es miembro propio en macOS — no hay una tecla
+# AltGr física distinta de la Option derecha, así que comparte virtual
+# keycode con alt_r y enum.Enum los colapsa (`Key.alt_gr is Key.alt_r`,
+# verificado contra el pynput del proyecto). Sin este alias, quien configura
+# "alt_gr" nunca vería _norm() devolver ese nombre — siempre reporta
+# "alt_r" — y la tecla de dictado no arrancaría jamás: sin error, sin log,
+# el fallo mudo que este módulo existe para evitar.
+_ALIAS_MISMA_TECLA = {
+    "alt_gr": "alt_r",
+}
+
 
 def _canon(name: str | None) -> str | None:
     """Nombre de tecla configurado → nombre que pynput reporta de verdad."""
     if not name:
         return name
     low = name.lower()
-    return _ALIAS_IZQUIERDA.get(low, low)
+    if low in _ALIAS_IZQUIERDA:
+        return _ALIAS_IZQUIERDA[low]
+    return _ALIAS_MISMA_TECLA.get(low, low)
 
 
 def _combo_names(keys: list[str]) -> frozenset[str]:
@@ -182,7 +196,7 @@ class HotkeyManager:
             self._started = True
         threading.Thread(target=self.on_start, daemon=True).start()
 
-    def reconfigure(self, toggle_key: str, toggle_mode: str, guard: bool) -> None:
+    def reconfigure(self, toggle_key: str, toggle_mode: str, guard: bool) -> bool:
         """Cambia la tecla de dictado sin recrear el manager.
 
         Vive aquí y no en app.py porque rehacer _toggle_combo al pasar a modo
@@ -190,8 +204,33 @@ class HotkeyManager:
         tecla quiere. El listener NO se rearranca aquí — de eso se encarga
         quien llama, que es el único que sabe si está en el hilo principal (y
         arrancar dos listeners a la vez aborta el proceso).
+
+        Devuelve False y deja la configuración anterior intacta si la tecla
+        canonicaliza a la misma que ya tiene dueño (latch o cancel). Hoy esa
+        colisión la evita keys._RESERVADAS, pero eso solo protege a quien pasa
+        por keys.resolve/validate_custom antes de llegar aquí — quien llama a
+        reconfigure() directo se la salta entera. Sin este chequeo,
+        reconfigure(toggle_key="shift_l", ...) deja _toggle_key == _latch_key
+        == "shift": el latch queda muerto (el `return` de la rama hold del
+        propio dictado nunca lo deja llegar) y el shift derecho fija en
+        silencio en vez de dictar — el mismo fallo mudo de siempre.
+
+        No se levanta una excepción: quien llama es código de menú de AppKit,
+        y una excepción sin capturar ahí se lleva la app entera por delante
+        por culpa de una tecla mal elegida. Devolver False deja que el
+        llamador decida cómo avisar (p.ej. no cerrar el submenú) sin arriesgar
+        el proceso.
         """
-        self._toggle_key = _canon(toggle_key)
+        canon = _canon(toggle_key)
+        if canon and (canon == self._latch_key or canon == self._cancel_key):
+            log.warning(
+                "reconfigure(%r) rechazado: canonicaliza a %r, que ya está en "
+                "uso (latch=%r, cancel=%r). Se mantiene la tecla anterior (%r).",
+                toggle_key, canon, self._latch_key, self._cancel_key, self._toggle_key,
+            )
+            return False
+
+        self._toggle_key = canon
         self.toggle_mode = toggle_mode
         self._guard = bool(guard)
         self._toggle_combo = (
@@ -201,6 +240,7 @@ class HotkeyManager:
         self._held = False
         self._started = False
         self._latched = False
+        return True
 
     # --- listener callbacks ---
     def _on_press(self, key):

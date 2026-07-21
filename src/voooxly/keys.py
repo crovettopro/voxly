@@ -44,6 +44,15 @@ _MODIFICADORES_CON_LADO = {
 # Teclas con dueño: no se pueden reasignar a dictado sin dejar la app coja.
 _RESERVADAS = {"esc", "shift", "shift_l", "shift_r"}
 
+# alt_gr no está en el catálogo pero pynput la colapsa en el mismo miembro de
+# enum que alt_r: en macOS no existe una tecla AltGr física distinta de la
+# Option derecha, así que ambas comparten virtual keycode y `Key.alt_gr is
+# Key.alt_r` (verificado contra el pynput del proyecto). needs_guard() tiene
+# que saberlo: sin este alias trataría alt_gr como "un modificador
+# cualquiera" y le pondría guarda, incoherente con que el catálogo ya trata
+# las derechas — que es lo que alt_gr ES de verdad — sin guarda.
+_ALIAS_MISMA_TECLA = {"alt_gr": "alt_r"}
+
 # Nombres de pynput que aceptamos fuera del catálogo (entrada "Custom…").
 # Las funciones llegan hasta f20 en pynput.
 _FUNCIONES = {f"f{i}" for i in range(1, 21)}
@@ -83,7 +92,7 @@ def needs_guard(name: str) -> bool:
     Las del catálogo lo llevan escrito. Una custom la necesita si es un
     modificador (se usa en combos); una función o una multimedia, no.
     """
-    k = get(name)
+    k = get(_ALIAS_MISMA_TECLA.get(name, name))
     if k is not None:
         return k.guard
     return _es_modificador(name)
@@ -118,9 +127,14 @@ def validate_custom(name: str) -> tuple[bool, str]:
         dueno = "cancel a dictation" if name.startswith("esc") else "latch a long dictation"
         return False, f'"{name}" is already used to {dueno}. Pick another key.'
     if name in _MODIFICADORES:
+        # OJO: no decir que "{name}" a secas casaría con las dos manos — en
+        # macOS solo casa con la izquierda (pynput colapsa Key.cmd_l en
+        # Key.cmd; ver hotkey._canon). Ese mensaje era falso, y encima el
+        # "arreglo" que sugería antes ({name}_l) canonicaliza de vuelta al
+        # mismo "{name}" plano. Se pide lado sin afirmar cuál casa hoy.
         return False, (
-            f'"{name}" would match both the left and the right key. '
-            f"Pick a side: {name}_l or {name}_r."
+            f'"{name}" needs a side — use {name}_l for the left key '
+            f"or {name}_r for the right key."
         )
     if name in _MODIFICADORES_CON_LADO or name in _FUNCIONES:
         return True, ""
