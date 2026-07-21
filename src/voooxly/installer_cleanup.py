@@ -17,6 +17,8 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+PREF_KEY = "installer_cleanup_done"
+
 
 @dataclass(frozen=True)
 class MountedInstaller:
@@ -47,3 +49,15 @@ def parse_hdiutil_info(info: dict) -> list[MountedInstaller]:
         device = entities[0].get("dev-entry", "") if entities else ""
         found.append(MountedInstaller(Path(path), device, Path(mount)))
     return found
+
+
+def should_offer(prefs: dict, bundle_path: str) -> bool:
+    """Only from an installed copy, and only ever once.
+
+    Running straight from the mounted DMG or from a dev checkout means there is
+    nothing to clean up yet, and nagging on every launch would be worse than
+    the leftover volume.
+    """
+    if prefs.get(PREF_KEY):
+        return False
+    return bundle_path.startswith("/Applications/")
