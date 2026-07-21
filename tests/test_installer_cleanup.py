@@ -1,4 +1,6 @@
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 from voooxly import installer_cleanup as ic
 
@@ -73,3 +75,71 @@ def test_stays_quiet_when_running_from_the_dmg_or_a_dev_checkout():
 
 def test_never_asks_twice():
     assert ic.should_offer({ic.PREF_KEY: True}, "/Applications/Voooxly.app") is False
+
+
+class Spy:
+    """Records the side effects so the orchestration can be asserted on."""
+
+    def __init__(self, dmg_exists=True, answer=True):
+        self.dmg_exists, self.answer = dmg_exists, answer
+        self.ejected, self.trashed, self.asked = [], [], []
+
+    def install(self, stack, inst):
+        stack.enter_context(patch.object(ic, "find_installer", return_value=inst))
+        stack.enter_context(patch.object(ic, "eject", side_effect=lambda i: self.ejected.append(i) or True))
+        stack.enter_context(patch.object(ic, "move_to_trash", side_effect=lambda p: self.trashed.append(p) or True))
+        stack.enter_context(patch.object(ic, "ask_user", side_effect=lambda n: self.asked.append(n) or self.answer))
+        stack.enter_context(patch.object(Path, "exists", lambda _self: self.dmg_exists))
+
+
+def run_cleanup(spy, inst, prefs=None):
+    prefs = {} if prefs is None else prefs
+    saved = []
+    with ExitStack() as stack:
+        spy.install(stack, inst)
+        ic.maybe_clean_up(prefs, saved.append, "/Applications/Voooxly.app")
+    return prefs, saved
+
+
+INSTALLER = ic.MountedInstaller(Path("/Users/someone/Downloads/Voooxly.dmg"),
+                                "/dev/disk8", Path("/Volumes/Voooxly 1"))
+
+
+def test_move_to_trash_ejects_then_trashes_and_remembers():
+    spy = Spy(answer=True)
+    prefs, saved = run_cleanup(spy, INSTALLER)
+    assert spy.asked == ["Voooxly.dmg"]
+    assert spy.ejected == [INSTALLER]
+    assert spy.trashed == [INSTALLER.dmg_path]
+    assert prefs[ic.PREF_KEY] is True
+    assert saved == [prefs]
+
+
+def test_keep_leaves_the_volume_alone_but_never_asks_again():
+    spy = Spy(answer=False)
+    prefs, _ = run_cleanup(spy, INSTALLER)
+    assert spy.ejected == [] and spy.trashed == []
+    assert prefs[ic.PREF_KEY] is True
+
+
+def test_ghost_volume_is_ejected_silently():
+    """The .dmg was already trashed by hand; the volume outlived it."""
+    spy = Spy(dmg_exists=False)
+    prefs, _ = run_cleanup(spy, INSTALLER)
+    assert spy.asked == []
+    assert spy.ejected == [INSTALLER]
+    assert spy.trashed == []
+    assert prefs[ic.PREF_KEY] is True
+
+
+def test_nothing_mounted_means_nothing_remembered():
+    """Next launch should still get its chance."""
+    spy = Spy()
+    prefs, saved = run_cleanup(spy, None)
+    assert spy.asked == [] and prefs == {} and saved == []
+
+
+def test_the_guard_short_circuits_before_touching_hdiutil():
+    with patch.object(ic, "find_installer") as find:
+        ic.maybe_clean_up({ic.PREF_KEY: True}, lambda p: None, "/Applications/Voooxly.app")
+    find.assert_not_called()
