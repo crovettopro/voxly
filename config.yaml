@@ -25,6 +25,16 @@ stt:
                           # (el whisper-server procesa en serie)
   keepalive_min: 4        # ping cada N min para mantener el modelo en RAM y evitar
                           # el arranque frío de 10-19s tras inactividad (0 = off)
+  transcribe_timeout_floor: 30    # mínimo del timeout de /inference: un dictado
+                                  # corto contra un server encallado tiene que
+                                  # seguir fallando rápido. El timeout real crece
+                                  # con la duración del audio (ver stt.py) — esto
+                                  # es solo el piso.
+  transcribe_timeout_ceiling: 180 # techo duro del timeout aunque el audio sea
+                                  # larguísimo: un server colgado no puede dejar
+                                  # la app esperando sin fin. A los 300s de
+                                  # audio.max_duration el cálculo da 150s, así
+                                  # que en la práctica no debería activarse.
 
 # --- Audio / VAD ---
 audio:

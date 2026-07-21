@@ -34,6 +34,46 @@ _server_ready = threading.Event()
 # descargas escribirían sobre el mismo .part y lo dejarían corrupto.
 _download_lock = threading.Lock()
 
+# Con tope de grabación de 60s, un timeout fijo de 30s en /inference nunca
+# dio problemas en producción — eso acota el peor caso real de whisper.cpp
+# (large-v3-turbo, Metal) a un RTF <= 0.5 (30s de cómputo por 60s de audio).
+# Al escalar el timeout con la duración mantenemos ESE MISMO ratio en vez de
+# inventar un número nuevo: a los 300s de audio.max_duration da 150s, muy por
+# debajo del techo de abajo. (whisper.cpp con Metal en Apple Silicon suele ir
+# bastante más rápido que esto en la práctica — el propio warmup de este
+# módulo mide ~0.3-0.8s en ventanas de 5s, RTF ~0.06-0.16 — así que 0.5 deja
+# margen de sobra para arranque en frío del modelo, CPU/GPU compartida con
+# otras apps o Macs más modestos.)
+_TRANSCRIBE_TIMEOUT_PER_SECOND = 0.5
+# Piso: igual que el timeout fijo de antes, para que un dictado corto contra
+# un server encallado siga fallando rápido — no regresionar el caso que ya
+# funcionaba bien.
+_TRANSCRIBE_TIMEOUT_FLOOR = 30.0
+# Techo duro: a los 300s de audio.max_duration el cálculo de arriba da 150s,
+# por debajo de esto — en la práctica no debería activarse nunca. Está aquí
+# como red de seguridad si audio.max_duration sube en el futuro o el cálculo
+# se desvía: un server colgado no puede dejar la app esperando sin fin.
+_TRANSCRIBE_TIMEOUT_CEILING = 180.0
+
+
+def _transcribe_timeout(audio: np.ndarray) -> float:
+    """Timeout de /inference proporcional al audio, no fijo.
+
+    Un timeout fijo bastaba cuando el tope de grabación era 60s. Con dictados
+    de hasta 5 min, transcribir puede tardar más que un fijo de 30s: el POST
+    expira, el `except Exception` de transcribe() lo traga y el dictado
+    entero se pierde sin pegar nada — el mismo bug que arregló subir el tope
+    de grabación, un paso más adelante en la cadena.
+    """
+    from .config import get_config
+
+    duration_s = len(audio) / SR
+    cfg = get_config()
+    floor = cfg.get("stt.transcribe_timeout_floor", _TRANSCRIBE_TIMEOUT_FLOOR)
+    ceiling = cfg.get("stt.transcribe_timeout_ceiling", _TRANSCRIBE_TIMEOUT_CEILING)
+    scaled = duration_s * _TRANSCRIBE_TIMEOUT_PER_SECOND
+    return min(ceiling, max(floor, scaled))
+
 
 def _find_model() -> str | None:
     # q5_0 primero: en Macs de 8GB el modelo sin cuantizar (1.5GB) se pagina
@@ -289,16 +329,20 @@ def transcribe(
             data["language"] = language
         if prompt:
             data["prompt"] = prompt
+        # Mismo timeout en el intento inicial y en el reintento: un dictado
+        # largo tarda lo mismo en transcribirse en ambos, así que arreglar
+        # solo uno de los dos dejaría el bug vivo en el otro camino.
+        timeout = _transcribe_timeout(audio)
         with open(wav_path, "rb") as f:
             files = {"file": ("audio.wav", f, "audio/wav")}
             try:
-                r = requests.post(f"{_server_url}/inference", files=files, data=data, timeout=30)
+                r = requests.post(f"{_server_url}/inference", files=files, data=data, timeout=timeout)
             except requests.exceptions.ConnectionError:
                 # reintenta arrancar el server una vez
                 if start_server():
                     with open(wav_path, "rb") as f:
                         files = {"file": ("audio.wav", f, "audio/wav")}
-                        r = requests.post(f"{_server_url}/inference", files=files, data=data, timeout=30)
+                        r = requests.post(f"{_server_url}/inference", files=files, data=data, timeout=timeout)
                 else:
                     return ""
         if not r.ok:
