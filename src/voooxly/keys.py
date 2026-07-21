@@ -57,7 +57,10 @@ _RESERVADAS = {"esc", "shift", "shift_l", "shift_r"}
 # las derechas — que es lo que alt_gr ES de verdad — sin guarda.
 _ALIAS_MISMA_TECLA = {"alt_gr": "alt_r"}
 
-# Nombres de pynput que aceptamos fuera del catálogo (entrada "Custom…").
+# Nombres de pynput que aceptamos fuera del catálogo. Ya no hay entrada
+# "Custom…" en el menú (la retiramos: ver DICTATION_KEYS), pero validate_custom
+# sigue siendo la puerta de prefs.json y de config.yaml > hotkeys.toggle, que
+# es por donde entra hoy quien quiera una F.
 # Las funciones llegan hasta f20 en pynput.
 _FUNCIONES = {f"f{i}" for i in range(1, 21)}
 
@@ -77,8 +80,8 @@ class DictationKey:
 # retiraron: F13-F15 no existen en ningún teclado de portátil, así que a quien
 # abría el menú en un MacBook le sobraban cuatro filas de diez que no podía
 # pulsar — y una lista donde casi la mitad no funciona hace dudar del resto.
-# Siguen aceptándose por Custom… (ver _FUNCIONES), que es justo el sitio donde
-# las busca quien tiene un teclado que las trae.
+# Siguen aceptándose por config.yaml > hotkeys.toggle (ver _FUNCIONES) para
+# quien tenga un teclado que las traiga y sepa editar el YAML.
 DICTATION_KEYS: dict[str, DictationKey] = {
     "cmd_r": DictationKey("cmd_r", "Right ⌘ (Command)", False),
     "alt_r": DictationKey("alt_r", "Right ⌥ (Option)", False),

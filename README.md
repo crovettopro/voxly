@@ -24,15 +24,26 @@ No account. No subscription. No telemetry. MIT-licensed.
 That's it. Whisper runs on your Mac, so this works with no internet, no API
 key and no account.
 
-**Not your key?** ⌘ is just the default. **Settings → Dictation key** offers
-all six bottom-row modifiers — right ⌘/⌥/⌃, and left ⌘/⌥/⌃ (these need a
-short hold, which is what keeps ⌘C and friends working normally). **Custom…**
-takes any other key pynput knows, like `f13`. Prefer pressing once to start
-and again to stop instead of holding? **Settings → Dictation style**.
+## Using Voooxly
 
-Two more shortcuts worth knowing: **Ctrl+Shift+M** cycles modes without
-opening the menu, and **Ctrl+Shift+V** pastes your last result again. Both
-are remappable in `config.yaml > hotkeys`.
+**Nothing here is fixed. Every key below can be changed.**
+
+| | | Change it in |
+|---|---|---|
+| **Hold right ⌘** | Dictate | Settings → Dictation key |
+| **Esc** | Throw away the dictation in progress | `config.yaml` |
+| **Shift** (while holding) | Latch hands-free, so you can let go | `config.yaml` |
+| **Ctrl+Shift+M** | Cycle through the modes | `config.yaml` |
+| **Ctrl+Shift+V** | Paste your last result again | `config.yaml` |
+
+**The dictation key is the one most people want to change**, and it's the one
+you can change without touching a file: **Settings → Dictation key** in the
+menu bar offers all six bottom-row modifiers — right ⌘/⌥/⌃ and left ⌘/⌥/⌃.
+The left ones need a short hold rather than a tap, which is exactly what keeps
+⌘C, ⌘V and ⌘Tab working normally while that key also dictates.
+
+Prefer pressing once to start and again to stop, instead of holding?
+**Settings → Dictation style**.
 
 Talk as long as you need — a single dictation can run up to five minutes.
 
@@ -98,19 +109,23 @@ Day-to-day dictation will not get close to them.
 
 The **AI engine** menu has five options, and switching is one click:
 
-| Provider | Needs | Why you'd pick it |
-|---|---|---|
-| **Groq** | a free API key | fastest way to start |
-| **Claude** | your API key | best rewriting quality |
-| **OpenAI** | your API key | if you already have a key |
-| **Google Gemini** | your API key | if you already have a key |
-| **Ollama (local)** | nothing — runs on your Mac | **zero** text ever leaves the machine |
+| Provider | What it needs |
+|---|---|
+| **Groq** | a free API key |
+| **Claude** | your API key |
+| **OpenAI** | your API key |
+| **Google Gemini** | your API key |
+| **Ollama (local)** | nothing — runs on your Mac |
 
-**Ollama is the one to pick if privacy is the point.** With a local model,
-Voooxly is end-to-end offline: audio never left your Mac to begin with, and
-now the text doesn't either. Install [Ollama](https://ollama.com), pull a
-model, and Voooxly asks your own server which models you have and lets you
-choose.
+They all do the job; pick whichever you already have an account with. Voooxly
+has no stake in which one you use and never sends anything anywhere except the
+provider you chose.
+
+Two things worth knowing. **Groq is the only free one**, which is why it's
+first in the list and why the setup above uses it. And **Ollama is the only
+one where no text leaves your Mac at all** — with a local model Voooxly is
+end-to-end offline. Install [Ollama](https://ollama.com), pull a model, and
+Voooxly asks your own server which models you have and lets you choose.
 
 Other OpenAI-compatible providers (OpenRouter, DeepSeek, Mistral, Together AI,
 xAI, …) can be wired up by hand — see
@@ -131,8 +146,8 @@ which Whisper already punctuates well. You just do the cleanup yourself.
 - **Bring your own AI (or none)**: Groq, Claude, OpenAI, Gemini or a local
   Ollama model — one click in the menu, key stored in the Keychain. See
   [Then connect an AI](#then-connect-an-ai-this-is-the-part-that-matters).
-- **Your dictation key, not ours**: any of the six bottom-row modifiers, or
-  anything else via Custom… — plus hold-to-talk or press-to-toggle.
+- **Your dictation key, not ours**: any of the six bottom-row modifiers, and
+  hold-to-talk or press-to-toggle. Every other shortcut is remappable too.
 - **Global hotkey + menu bar + live HUD**: a status HUD shows `● Listening`
   with your words appearing in real time, `✦ Processing` while it polishes and
   `✓ Pasted` when done; the menu bar turns into a red dot with a timer while
@@ -228,48 +243,48 @@ keeps playing over you.
 
 ### Configuration
 
-Everything lives in `config.yaml`, with `.env` overrides (see `.env.example`):
-
-- `VOOOXLY_LLM_BACKEND` = `ollama` | `claude` | `openai` | `none` — the
-  *transport*, not the vendor. Groq and Gemini both ride the `openai` kind,
-  since they expose OpenAI-compatible endpoints.
-- `ANTHROPIC_API_KEY` — cleanup with Claude
-- `VOOOXLY_APP_LANGUAGE` — force an output language (default: keep the language you spoke)
-
-Useful knobs in `config.yaml`:
+Everything lives in `config.yaml`, with `.env` overrides (see `.env.example`).
 
 | Key | Default | What it does |
 |---|---|---|
 | `audio.max_duration` | `300` | Hard stop for one dictation, in seconds |
 | `stt.transcribe_timeout_floor` | `30` | Lower bound for the `/inference` timeout |
 | `stt.transcribe_timeout_ceiling` | `180` | Upper bound; the real timeout scales with audio length |
-| `hotkeys.toggle` | `[cmd_r]` | Dictation key; the menu writes `prefs.json`, which wins over this |
+| `hotkeys.toggle` | `[cmd_r]` | Dictation key. The menu writes `prefs.json`, which wins over this |
+| `hotkeys.cancel` · `latch` · `cycle_mode` · `paste_last` | | The other shortcuts |
 | `llm.custom_rules` | — | Free-text style rules appended to every mode |
+| `app.language` | `null` | Output language; `null` keeps whatever you spoke |
 
-**No AI is baked in, on purpose.** `llm.ollama.model` ships empty: a fixed
-default would presume which model *you* happen to have, and a cloud-only
-default (like Ollama's `:cloud` models) would quietly fail for anyone without
-that subscription while still reporting "connected".
+**Voooxly does not pick an AI for you and has no favourite.** Whichever
+provider you connect is the one it uses, and `llm.ollama.model` ships empty on
+purpose — a baked-in default would presume which model you happen to have, and
+a cloud-only one would quietly fail for anyone without that subscription while
+still reporting "connected".
 
-To wire a provider by hand instead of using the menu — this is also how you
-reach OpenRouter, DeepSeek, Mistral, Together AI or xAI, none of which have a
-menu entry:
+`VOOOXLY_LLM_BACKEND` selects the *transport*, not the vendor: `ollama` |
+`claude` | `openai` | `none`. Most providers speak the OpenAI protocol, so
+`openai` is the value you want for anything that isn't Ollama or Claude — set
+`base_url` and `api_key_env` to point it wherever you like:
 
 ```yaml
-# config.yaml
+# config.yaml — any OpenAI-compatible provider
 llm:
   backend: openai
   openai:
-    base_url: "https://openrouter.ai/api/v1"
-    model: "meta-llama/llama-3.3-70b-instruct"
-    api_key_env: "OPENROUTER_API_KEY"
+    base_url: "https://<provider>/v1"
+    model: "<the model you want>"
+    api_key_env: "MY_PROVIDER_KEY"
 ```
 
-Or fully local, no key at all:
+That covers the providers with no menu entry — OpenRouter, DeepSeek, Mistral,
+Together AI, xAI and the rest. If you just want something that works without
+paying, Groq's free key does the job and is two clicks from the menu bar.
+
+Or fully local, no key at all — pull whichever model you prefer and name it:
 
 ```bash
-ollama pull qwen3:8b
-# config.yaml → llm.ollama.model: "qwen3:8b"
+ollama pull <model>
+# config.yaml → llm.ollama.model: "<model>"
 ```
 
 ### Architecture

@@ -94,22 +94,6 @@ def ai_engine_title(selection, detected: str) -> str:
     return f"AI engine — {label} (auto)"
 
 
-def custom_key_item(active_key: str) -> tuple[str, int]:
-    """(título, check) del item "Custom…" del submenú Dictation key.
-
-    A nivel de módulo por el mismo motivo que ai_menu_labels: instanciar
-    VoooxlyApp construye menús de AppKit y no corre en pytest.
-
-    Sin esto, una tecla fuera del catálogo deja el submenú ENTERO sin marcar y
-    parece que la app perdió el ajuste. Pasa de verdad: quien tuviera F13 —
-    que estuvo en el menú y ya no está — abre Dictation key tras actualizar y
-    no ve nada marcado, aunque su tecla siga funcionando perfectamente.
-    """
-    if active_key in keys.DICTATION_KEYS:
-        return "Custom…", 0
-    return f"Custom… ({active_key})", 1
-
-
 def apply_ai_selection(cfg, sel) -> None:
     """Aplica la elección al config VIVO (aquí sí toca: es configurar la app).
 
@@ -315,10 +299,6 @@ class VoooxlyApp(rumps.App):
             self.key_parent.add(mi)
             self.key_items[k] = mi
         self.key_parent.add(rumps.separator)
-        titulo_custom, check_custom = custom_key_item(self._dictation_key)
-        self.key_custom_item = rumps.MenuItem(titulo_custom, callback=self._pick_custom_key)
-        self.key_custom_item.state = check_custom
-        self.key_parent.add(self.key_custom_item)
 
         self.style_parent = rumps.MenuItem("Dictation style")
         self.style_items: dict[str, rumps.MenuItem] = {}
@@ -1064,7 +1044,7 @@ class VoooxlyApp(rumps.App):
             return
         # Choque con las otras teclas: la de dictado no puede ser también la
         # de cancelar ni la de latch, o una de las dos deja de funcionar.
-        # keys._RESERVADAS ya filtra esto para el catálogo y para Custom…,
+        # keys._RESERVADAS ya filtra esto para el catálogo y para el YAML,
         # pero el hotkey lo vuelve a comprobar en reconfigure() — este chequeo
         # de aquí solo da un mensaje más específico (qué tecla es y de quién)
         # antes de intentar el reinicio en caliente.
@@ -1116,30 +1096,17 @@ class VoooxlyApp(rumps.App):
         _save_prefs(self._prefs)
         self._hud(keys.MODES[mode], title="✓ Dictation style changed")
 
-    def _pick_custom_key(self, _sender):
-        w = rumps.Window(
-            title="Custom dictation key",
-            message=(
-                "Type a pynput key name — for example f18, alt_r or ctrl_l.\n"
-                "Avoid single letters: that key would stop typing everywhere."
-            ),
-            default_text=self._dictation_key,
-            ok="Use it",
-            cancel="Cancel",
-            dimensions=(220, 22),
-        )
-        resp = w.run()
-        if not resp.clicked:
-            return
-        self._set_dictation_key((resp.text or "").strip().lower())
-
     def _restart_hotkey(self, new_key: str, new_mode: str) -> bool:
-        """Reconstruye el listener con la tecla/modo nuevos, sin reiniciar la app.
+        """Aplica tecla/modo nuevos al listener que ya está corriendo.
 
-        POR EL HILO PRINCIPAL, siempre: parar y arrancar el listener de pynput
-        desde un hilo de fondo es el SIGABRT de HIToolbox que documenta el
-        header de hotkey.py. Y las marcas del menú son NSMenuItem, que es el
-        SIGTRAP del otro. Los dos motivos llevan al mismo sitio.
+        El nombre dice "restart" por historia: hoy NO se para ni se rearranca
+        nada. Ese rearranque mataba la app (ver el comentario de apply()) y
+        además nunca hizo falta, porque reconfigure() solo cambia atributos que
+        los callbacks releen en cada evento.
+
+        POR EL HILO PRINCIPAL, siempre: las marcas del menú son NSMenuItem, y
+        escribirlas desde un hilo de fondo es el SIGTRAP que documenta el
+        header de hotkey.py.
 
         Devuelve si el cambio se aplicó de verdad. reconfigure() puede
         rechazar `new_key` (choca con cancel/latch) y entonces deja su config
@@ -1168,8 +1135,21 @@ class VoooxlyApp(rumps.App):
         resultado = {"ok": False}
 
         def apply():
+            # NO se para ni se rearranca el listener. Hacerlo mataba la app:
+            # pynput arranca el suyo con `with keycode_context()`
+            # (_darwin.py:272), que llama a TISGetInputSourceProperty DESDE EL
+            # HILO DEL LISTENER. macOS exige el hilo principal para las APIs de
+            # fuentes de entrada, pero solo lo comprueba cuando toca
+            # reconstruir la lista — con la caché caliente pasa desapercibido.
+            # Pulsar F5 (Dictado del sistema en un Mac) cambia la fuente de
+            # entrada e invalida la caché: el rearranque siguiente la
+            # reconstruía desde el hilo equivocado y HIToolbox mataba el
+            # proceso con SIGTRAP en dispatch_assert_queue.
+            #
+            # Y nunca hizo falta: reconfigure() solo toca atributos normales
+            # (_toggle_key, toggle_mode, _guard) y _on_press/_on_release los
+            # leen en cada evento. El mismo listener obedece la tecla nueva.
             try:
-                self._hotkey.stop()
                 resultado["ok"] = self._hotkey.reconfigure(
                     toggle_key=new_key,
                     toggle_mode=new_mode,
@@ -1177,19 +1157,11 @@ class VoooxlyApp(rumps.App):
                 )
             except Exception:
                 log.exception("No pude reconfigurar el hotkey con la tecla nueva")
-            finally:
-                try:
-                    self._hotkey.start()
-                except Exception:
-                    log.exception("No pude rearrancar el listener de hotkeys")
             if resultado["ok"]:
                 self._dictation_key = new_key
                 self._toggle_mode = new_mode
             for k, mi in self.key_items.items():
                 mi.state = 1 if k == self._dictation_key else 0
-            self.key_custom_item.title, self.key_custom_item.state = custom_key_item(
-                self._dictation_key
-            )
             for m, mi in self.style_items.items():
                 mi.state = 1 if m == self._toggle_mode else 0
 

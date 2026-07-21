@@ -57,7 +57,17 @@ hotkeys:
   #   "toggle" = pulsa para empezar, pulsa/te callas para terminar
   toggle_mode: "hold"
   # Tecla de dictado. En modo "hold" debe ser UNA tecla (p.ej. "cmd_r", "alt_r", "f6").
-  # Evita F5 (macOS lo roba para Siri) y otras teclas con función del sistema.
+  # El menú (Settings → Dictation key) solo ofrece los seis modificadores de la
+  # fila de abajo; cualquier otra tecla válida se pone aquí a mano.
+  #
+  # EVITA F5: en un Mac es la tecla de Dictado del sistema. Al pulsarla macOS
+  # cambia la fuente de entrada e invalida la caché de TIS/TSM, y hasta la
+  # versión actual eso mataba el proceso con SIGTRAP (HIToolbox exige el hilo
+  # principal para reconstruir esa lista, y pynput la tocaba desde el hilo de
+  # su listener). Ya no crashea — hotkey._warm_input_sources y no rearrancar el
+  # listener lo cierran — pero sigue siendo mala elección: macOS se queda el
+  # evento para su propio dictado. Igual con otras teclas con función de
+  # sistema.
   toggle: ["cmd_r"]
   # Cambiar al modo siguiente
   cycle_mode: ["ctrl","shift","m"]

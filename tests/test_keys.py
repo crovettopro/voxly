@@ -5,7 +5,7 @@ teclado entero. Con 'a' como tecla de dictado dejas de poder escribir la letra
 a en todo el sistema; con 'esc' pierdes el cancelar; con 'cmd' a secas capturas
 los dos lados. Estos tests fijan cada puerta.
 """
-from voooxly import app, keys
+from voooxly import keys
 
 
 def test_el_default_es_la_tecla_que_ya_venia_de_fabrica():
@@ -37,8 +37,8 @@ def test_el_menu_ofrece_las_seis_teclas_de_abajo_y_nada_mas():
 
 
 def test_las_efes_siguen_valiendo_por_custom():
-    # Retirarlas del menú no las prohíbe: quien tenga un teclado grande y las
-    # quiera las escribe en Custom… y siguen entrando sin guarda.
+    # Retirarlas del menú no las prohíbe: validate_custom sigue siendo la
+    # puerta de prefs.json y config.yaml, y por ahí entran sin guarda.
     for f in ("f6", "f13", "f15", "f20"):
         assert keys.validate_custom(f)[0] is True, f
         assert keys.needs_guard(f) is False, f
@@ -197,16 +197,3 @@ class _FakeCfg:
 
     def get(self, path, default=None):
         return self._data.get(path, default)
-
-
-# --- El item "Custom…" del menú: la única pista de una tecla fuera del catálogo ---
-
-def test_custom_sale_sin_marcar_con_una_tecla_del_catalogo():
-    assert app.custom_key_item("cmd_r") == ("Custom…", 0)
-
-
-def test_custom_se_marca_y_dice_cual_con_una_tecla_de_fuera():
-    # Quien venía de F13 (estaba en el menú, ya no) abriría "Dictation key" y
-    # no vería NADA marcado: parece que la app perdió su ajuste. El check en
-    # Custom… con la tecla escrita es lo que dice "sigue siendo la tuya".
-    assert app.custom_key_item("f13") == ("Custom… (f13)", 1)

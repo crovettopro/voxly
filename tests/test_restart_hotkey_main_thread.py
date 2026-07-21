@@ -41,14 +41,6 @@ class _HotkeyFalso:
         return True
 
 
-class _ItemFalso:
-    """Un NSMenuItem con lo justo: título y check, ambos escribibles."""
-
-    def __init__(self, title="Custom…", state=0):
-        self.title = title
-        self.state = state
-
-
 class _AppFalsa:
     """Doble mínimo: solo lo que _restart_hotkey lee o escribe."""
 
@@ -58,7 +50,6 @@ class _AppFalsa:
         self._toggle_mode = "hold"
         self.key_items = {}
         self.style_items = {}
-        self.key_custom_item = _ItemFalso()
 
     def _on_main(self, fn):
         # Igual que el _on_main real en el hilo principal: síncrono.
@@ -87,23 +78,28 @@ def test_restart_hotkey_exige_el_hilo_principal():
 
 def test_restart_hotkey_funciona_normal_en_el_hilo_principal():
     fake = _AppFalsa()
-    aplicado = VoooxlyApp._restart_hotkey(fake, "f13", "hold")
+    aplicado = VoooxlyApp._restart_hotkey(fake, "alt_r", "hold")
     assert aplicado is True
-    assert fake._dictation_key == "f13"
+    assert fake._dictation_key == "alt_r"
 
 
-def test_restart_hotkey_marca_custom_al_saltar_a_una_tecla_de_fuera_del_menu():
-    # f13 salió del catálogo: sin marcar Custom… el submenú se queda entero
-    # sin check y parece que no se aplicó nada.
+def test_cambiar_de_tecla_NO_rearranca_el_listener():
+    """El rearranque mataba la app con SIGTRAP.
+
+    pynput arranca su listener con `with keycode_context()` (_darwin.py:272),
+    que llama a TISGetInputSourceProperty DESDE EL HILO DEL LISTENER. macOS
+    exige que las APIs de fuentes de entrada vayan por el hilo principal, pero
+    solo lo verifica cuando tiene que reconstruir la lista — normalmente está
+    cacheada y no pasa nada. Pulsar F5 (la tecla de Dictado del sistema en un
+    Mac) cambia la fuente de entrada e invalida esa caché: el siguiente
+    arranque del listener la reconstruye desde el hilo equivocado y HIToolbox
+    mata el proceso con SIGTRAP en dispatch_assert_queue.
+
+    Y el rearranque nunca hizo falta: reconfigure() solo toca atributos
+    normales, y _on_press/_on_release los leen en cada evento. Su propio
+    docstring dice "sin recrear el manager".
+    """
     fake = _AppFalsa()
-    VoooxlyApp._restart_hotkey(fake, "f13", "hold")
-    assert fake.key_custom_item.state == 1
-    assert "f13" in fake.key_custom_item.title
-
-
-def test_restart_hotkey_desmarca_custom_al_volver_al_catalogo():
-    fake = _AppFalsa()
-    VoooxlyApp._restart_hotkey(fake, "f13", "hold")
     VoooxlyApp._restart_hotkey(fake, "alt_r", "hold")
-    assert fake.key_custom_item.state == 0
-    assert fake.key_custom_item.title == "Custom…"
+    assert fake._hotkey.parada is False, "stop() re-entra en keycode_context() al volver a start()"
+    assert fake._hotkey.arrancada is False, "start() llama a TIS/TSM desde el hilo del listener"

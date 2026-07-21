@@ -126,6 +126,38 @@ def _combo_names(keys: list[str]) -> frozenset[str]:
     return frozenset(_canon(k) for k in keys)
 
 
+def _warm_input_sources() -> None:
+    """Deja la lista de fuentes de entrada de macOS construida ANTES de crear
+    el listener, y desde el hilo que la llame (que debe ser el principal).
+
+    pynput arranca su listener con `with keycode_context()` (_darwin.py:272),
+    y ese contextmanager llama a TISGetInputSourceProperty desde el hilo del
+    propio listener. macOS exige que las APIs TIS/TSM vayan por el hilo
+    principal, pero solo lo comprueba cuando tiene que RECONSTRUIR la lista:
+    con la caché caliente la llamada pasa sin ruido, que es por lo que esto
+    funcionó durante meses. Cuando algo la invalida —cambiar de idioma de
+    teclado, o pulsar F5, que en un Mac es la tecla de Dictado del sistema— el
+    siguiente arranque la reconstruye desde el hilo equivocado y HIToolbox
+    mata el proceso con SIGTRAP en dispatch_assert_queue.
+
+    Tocarla aquí primero la deja cacheada, así que la llamada del listener ya
+    no reconstruye nada. Queda una ventana de carrera de milisegundos (que la
+    fuente cambie justo entre esta línea y el arranque del listener), pero es
+    incomparablemente más estrecha que la de antes.
+
+    Nunca lanza: es una precaución, y pynput._util es API privada que podría
+    moverse en una versión futura. Si desaparece, volvemos al comportamiento
+    anterior en vez de dejar la app sin hotkeys.
+    """
+    try:
+        from pynput._util.darwin import keycode_context
+
+        with keycode_context():
+            pass
+    except Exception:
+        log.debug("No pude precalentar TIS/TSM antes del listener", exc_info=True)
+
+
 class HotkeyManager:
     def __init__(
         self,
@@ -366,6 +398,7 @@ class HotkeyManager:
             self._cancel_guard()
 
     def start(self) -> None:
+        _warm_input_sources()
         self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()
         log.info("Hotkeys activos (modo %s, tecla dictado: %s).", self.toggle_mode, self._toggle_key)
