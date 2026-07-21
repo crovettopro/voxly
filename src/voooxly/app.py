@@ -119,6 +119,31 @@ def apply_ai_selection(cfg, sel) -> None:
         cfg._set_path("llm.openai.base_url", sel.base_url)
 
 
+def _record_token_usage(refiner, prefs) -> None:
+    """Cuenta los tokens del último refino remoto, si los hubo.
+
+    A nivel de módulo (mismo motivo que apply_ai_selection: poder testear sin
+    instanciar VoooxlyApp) y porque _process la llama DESPUÉS de
+    output.deliver() a propósito: contar tokens es puro best-effort para que
+    quien use un free tier vea cuánto lleva gastado, y NUNCA puede impedir ni
+    preceder el pegado. Antes, ai_settings.load(self._prefs) corría dentro
+    del try/except de _process y ANTES de deliver(); si lanzaba (un
+    prefs.json corrupto, por ejemplo), _process abortaba al catch-all y el
+    texto ya refinado no llegaba a pegarse — perder el dictado del usuario
+    por un fallo al contar tokens es el peor desenlace posible aquí.
+    """
+    try:
+        usados = getattr(refiner, "last_usage", None)
+        if not usados:
+            return
+        from . import ai_settings
+
+        sel = ai_settings.load(prefs)
+        stats.bump_tokens(usados, sel.provider.label if sel else "")
+    except Exception:
+        log.debug("No pude contar tokens tras el pegado", exc_info=True)
+
+
 class VoooxlyApp(rumps.App):
     def __init__(self):
         cfg = get_config()
@@ -794,14 +819,6 @@ class VoooxlyApp(rumps.App):
             self._last_result = final
             self._push_history(final)
             stats.bump(len(final.split()), duration)
-            # Tokens del LLM remoto, si lo hubo. getattr porque en fast-lane
-            # refiner es None — el mismo patrón que el aviso de last_fallback.
-            usados = getattr(refiner, "last_usage", None)
-            if usados:
-                from . import ai_settings
-
-                sel = ai_settings.load(self._prefs)
-                stats.bump_tokens(usados, sel.provider.label if sel else "")
             log.info("Final (+%.1fs): %s", time.monotonic() - t0, final)
             # 3) entregar
             auto_paste = bool(self.cfg.get("output.auto_paste", True))
@@ -816,6 +833,11 @@ class VoooxlyApp(rumps.App):
                 except Exception:
                     log.debug("markdown_to_html falló; pego solo texto plano", exc_info=True)
             status = output.deliver(final, auto_paste=auto_paste, copy=copy, html=html)
+            # Tokens del LLM remoto, si lo hubo — SIEMPRE después de entregar:
+            # nada en este camino puede impedir ni preceder el pegado (ver
+            # _record_token_usage). getattr porque en fast-lane refiner es
+            # None — el mismo patrón que el aviso de last_fallback más abajo.
+            _record_token_usage(refiner, self._prefs)
             # El texto ya se pegó (con o sin refino): este aviso solo informa
             # que la IA no actuó y se pegó la transcripción cruda por un fallo
             # (red caída, proveedor roto..., o el catch-all de arriba si

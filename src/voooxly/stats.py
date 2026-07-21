@@ -84,8 +84,24 @@ def summary(path: Path | None = None) -> str:
         f"{saved} of typing saved"
     )
     if s["tokens"]:
-        miles = s["tokens"] / 1000
-        cifra = f"{miles:.0f}k" if miles >= 1 else f"{s['tokens']}"
+        cifra = _formato_tokens(s["tokens"])
         quien = f" · {s['token_provider']}" if s["token_provider"] else ""
         out += f"\n~{cifra} tokens{quien}"
     return out
+
+
+def _formato_tokens(tokens: int) -> str:
+    """"k"/"M" según magnitud, sin que el redondeo desborde la escala.
+
+    Redondear en "k" cerca de un millón (p.ej. 999.500 → 999.5k → "1000k" con
+    .0f) produce una escala que no existe: "1000k" debería ser "1M". Por eso
+    la promoción a M se decide DESPUÉS de redondear, no antes.
+    """
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M"
+    if tokens >= 1000:
+        miles = round(tokens / 1000)
+        if miles >= 1000:  # el redondeo empujó a la escala de millón
+            return f"{tokens / 1_000_000:.1f}M"
+        return f"{miles}k"
+    return f"{tokens}"

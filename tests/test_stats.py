@@ -87,6 +87,28 @@ def test_el_resumen_calla_los_tokens_si_no_hay(tmp_path):
     assert "tokens" not in stats.summary(p)
 
 
+def test_el_resumen_muestra_los_tokens_en_millones(tmp_path):
+    # Hallazgo 4: 5.000.000 no puede leerse "5000k tokens" — hay que pasar a
+    # escala M por encima del millón.
+    p = tmp_path / "stats.json"
+    stats.bump(10, 4.0, p)
+    stats.bump_tokens(5_000_000, "Groq", p)
+    out = stats.summary(p)
+    assert "5.0M tokens" in out
+    assert "5000k" not in out
+
+
+def test_el_resumen_no_redondea_a_1000k_cerca_del_millon(tmp_path):
+    # Hallazgo 4: 999.500 con .0f sobre miles redondea a "1000k", que no es
+    # una escala válida — debe promocionarse a "1.0M".
+    p = tmp_path / "stats.json"
+    stats.bump(10, 4.0, p)
+    stats.bump_tokens(999_500, "Groq", p)
+    out = stats.summary(p)
+    assert "1000k" not in out
+    assert "1.0M tokens" in out
+
+
 def test_un_fichero_viejo_sin_tokens_se_lee_sin_romper(tmp_path):
     # Quien ya tiene stats.json de una versión anterior no puede perderlas.
     import json

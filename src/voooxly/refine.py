@@ -226,16 +226,25 @@ class Refiner:
                 messages=[{"role": "user", "content": user}],
                 timeout=timeout,
             )
-            # getattr en cascada, nunca acceso directo: esto vive DENTRO del
-            # try que hace fallback a Ollama, así que un AttributeError aquí
-            # (un SDK que renombre `usage`) haría que una llamada a Claude que
-            # funcionó perfectamente se reintentara contra Ollama. Contar
-            # tokens no puede alterar el refinado.
-            usage = getattr(resp, "usage", None)
-            entrada = getattr(usage, "input_tokens", 0) or 0
-            salida = getattr(usage, "output_tokens", 0) or 0
-            self.last_usage = (entrada + salida) or None
-            return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+            texto = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+            # El conteo corre DESPUÉS de tener `texto` construido, y en su
+            # PROPIO try/except — no en el de fuera. "getattr no puede
+            # lanzar" era mentira: getattr sólo traga AttributeError, así que
+            # un SDK que cambie la forma de `usage`, o entrada/salida no
+            # numéricos (deriva de esquema), lanzaban igual y escapaban al
+            # except de fuera, reintentando contra Ollama una llamada a
+            # Claude que YA había respondido bien. Con esto, un fallo aquí
+            # sólo pierde su propio conteo — nunca el texto ya construido, y
+            # nunca puede quedar con tokens de una respuesta que un fallback
+            # posterior descarta (last_usage se asigna sólo si `texto` existe).
+            try:
+                usage = getattr(resp, "usage", None)
+                entrada = getattr(usage, "input_tokens", 0) or 0
+                salida = getattr(usage, "output_tokens", 0) or 0
+                self.last_usage = (entrada + salida) or None
+            except Exception:
+                log.debug("No pude leer usage de Claude; sigo sin contar tokens", exc_info=True)
+            return texto
         except Exception as e:
             if self.strict:
                 raise
@@ -274,11 +283,19 @@ class Refiner:
             )
             r.raise_for_status()
             data = r.json()
-            # `usage` es opcional en el protocolo: un proveedor que no lo
-            # mande no puede romper el dictado, solo se queda sin contar.
-            usage = data.get("usage") or {}
-            self.last_usage = usage.get("total_tokens") or None
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            texto = (data["choices"][0]["message"]["content"] or "").strip()
+            # Mismo orden y mismo motivo que en _claude: el conteo corre
+            # DESPUÉS de tener `texto`, y en su propio try/except. `usage` es
+            # opcional en el protocolo y su forma no está garantizada — un
+            # proveedor que mande un valor truthy no-dict (deriva de esquema)
+            # no puede tirar por la borda una respuesta que sí contestó bien;
+            # sólo se queda sin contar sus tokens.
+            try:
+                usage = data.get("usage") or {}
+                self.last_usage = usage.get("total_tokens") or None
+            except Exception:
+                log.debug("No pude leer usage de OpenAI; sigo sin contar tokens", exc_info=True)
+            return texto
         except Exception as e:
             if self.strict:
                 raise
