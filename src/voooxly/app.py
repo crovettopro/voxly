@@ -1449,14 +1449,29 @@ class VoooxlyApp(rumps.App):
         # Primer arranque (o permiso revocado): el asistente explica qué falta y
         # guía cada paso. Va aquí, en el main thread, porque NSWindow no puede
         # instanciarse fuera de él. No bloquea: la ventana convive con la app.
+        # needs_setup() sondea permisos (micro, Accesibilidad): se llama UNA vez
+        # y se reutiliza. Por defecto True para que un fallo del sondeo deje la
+        # limpieza en paz en vez de soltar un alert sobre un arranque ya roto.
+        needs_setup = True
         try:
-            if setup_checks.needs_setup():
+            needs_setup = setup_checks.needs_setup()
+            if needs_setup:
                 from .onboarding import show_onboarding
 
                 show_onboarding(on_finish=self._on_onboarding_done,
                                 on_connect_ai=self._connect_ai_from_onboarding)
         except Exception as e:
             log.warning("No pude mostrar el onboarding: %s", e)
+        # Setup ya completo: si el DMG del instalador sigue montado, ofrecemos
+        # expulsarlo y mandarlo a la papelera. Va aquí, en el main thread, que es
+        # lo que exige el NSAlert. Pregunta una sola vez (flag en prefs).
+        if not needs_setup:
+            from AppKit import NSBundle
+
+            from .installer_cleanup import maybe_clean_up
+
+            maybe_clean_up(self._prefs, _save_prefs,
+                           str(NSBundle.mainBundle().bundlePath()))
         # arranca whisper-server en background para que el primer dictado no pague el coste
         threading.Thread(target=self._warmup, daemon=True).start()
         self._hotkey.start()
