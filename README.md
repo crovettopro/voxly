@@ -1,16 +1,72 @@
-# Voooxly — private, on-device voice dictation for macOS
+# Voooxly
 
-**Hold a key, speak, let go — polished text appears in whatever app you're using.**
-100% local speech-to-text on Apple Silicon: your voice never leaves your Mac.
+Private, on-device voice dictation for macOS. Hold a key, speak, and clean
+text appears wherever you were typing — no account, no subscription, no
+telemetry.
 
-Voooxly doesn't just transcribe. An LLM **rewrites what you said according to the
-active mode** — organize your thoughts, draft a reply, shape an AI prompt, take
-Markdown notes — and the result is pasted right where your cursor is.
+**[⬇ Download Voooxly for macOS (Apple Silicon)](https://github.com/crovettopro/voooxly/releases/latest)**
 
-🌐 **Website & download:** [voooxly.com](https://voooxly.com) ·
-📦 **Latest DMG:** [Releases](https://github.com/crovettopro/voooxly/releases)
+## Get started in 2 minutes
 
-## Features
+1. **Open the DMG** and drag Voooxly to Applications.
+2. **Launch it.** macOS will ask for two permissions — Microphone (to hear
+   you) and Accessibility (to type into other apps). Both are required.
+3. **Hold the right ⌘ key, speak, let go.** Your words appear where your
+   cursor is.
+
+That's it. Whisper runs on your Mac, so this works with no internet, no API
+key and no account.
+
+Want a different key? **Settings → Dictation key** — right ⌘/⌥/⌃, left
+⌘/⌥/⌃ (a short delay keeps their combos like ⌘C working), F6/F13–F15, or
+**Custom…** for anything else. Prefer pressing once to start and again to
+stop instead of holding? **Settings → Dictation style**.
+
+Two more shortcuts worth knowing: **Ctrl+Shift+M** cycles modes without
+opening the menu, and **Ctrl+Shift+V** pastes your last result again. Both
+are remappable in `config.yaml > hotkeys`.
+
+## Optional: free AI with Groq (30 seconds)
+
+Out of the box Voooxly pastes the raw transcription, which Whisper already
+punctuates well. Connect an AI and it also cleans up filler words, fixes
+grammar and reshapes your words to the mode you picked.
+
+**Groq is free and takes half a minute:**
+
+1. Go to [console.groq.com/keys](https://console.groq.com/keys) and sign in.
+2. Create an API key and copy it.
+3. In Voooxly's menu bar icon: **AI engine → Groq — free**, then paste the
+   key when it asks.
+
+The key is stored in your macOS Keychain, never in a file.
+
+### What it costs you
+
+Nothing — but "free tier" has limits, so Voooxly counts what you actually
+spend. **Usage stats…** in the menu shows your running total.
+
+| | |
+|---|---|
+| A typical dictation | ~500–850 tokens (estimate) |
+| Groq's free limits | [see your current limits](https://console.groq.com/settings/limits) |
+
+That range is an estimate, not a measured average — and most of it isn't
+your words. About 400 of those tokens are the fixed system prompt Voooxly
+sends with every request so the AI knows which mode you're in; that cost is
+the same whether you dictated one sentence or three. The transcript and the
+cleaned-up text each add roughly as many tokens as you spoke — tens of tokens
+for a short dictation, more for a long one. Groq's free-tier limits differ
+per model and change over time, so the link above is the honest answer
+rather than a number that would go stale. For normal day-to-day dictation you
+will not get close.
+
+Prefer something else? The **AI engine** menu also has Claude, OpenAI and
+Google Gemini — or **Ollama (local)** to run fully local with no key at all.
+Other OpenAI-compatible providers (OpenRouter, DeepSeek, Mistral, Together
+AI, xAI, …) can be wired up by hand — see **For developers → Configuration**.
+
+## What it does
 
 - **On-device STT** with `whisper.cpp` (native binary, Metal on Apple Silicon, no torch).
   Whisper large-v3-turbo: ~99 languages, strongest in English and Spanish.
@@ -33,21 +89,6 @@ Markdown notes — and the result is pasted right where your cursor is.
   replacements), **persistent searchable history** and **usage stats**.
 - **Free.** No account, no subscription, no telemetry.
 
-## Using Voooxly
-
-Download the DMG from [voooxly.com](https://voooxly.com), drag
-Voooxly to Applications, and a first-run assistant walks you through microphone
-and Accessibility permissions, the model download and (optionally) an AI engine.
-
-- **Right ⌘ (hold)** — push-to-talk: speak while holding, release to finish.
-- **Right ⌘ + Shift** — latch: recording locks hands-free; tap right ⌘ to finish.
-- **Esc** — cancel the dictation in progress; nothing is pasted.
-- **Ctrl+Shift+M** — cycle modes; the HUD flashes the mode you landed on
-  (`❯ AI prompt · 2/8`) so you're never cycling blind.
-- **Ctrl+Shift+V** — paste the last result again.
-
-Key and behavior are configurable (`config.yaml > hotkeys`).
-
 ## Modes
 
 | Mode | What you get |
@@ -66,7 +107,7 @@ your personal style, add free-text rules in `config.yaml > llm.custom_rules`
 from source? You can
 define whole new modes in `src/voooxly/modes.py`.
 
-## Privacy model
+## Privacy
 
 Audio is recorded, transcribed and discarded **on your Mac** — the Whisper model
 runs locally via `whisper-server`. If you connect a cloud AI for text cleanup
@@ -75,7 +116,13 @@ audio. With a local Ollama model or no AI at all, nothing leaves your machine.
 
 ---
 
-## Building from source
+## For developers
+
+Everything below is for building Voooxly from source, running it in dev mode,
+or understanding how it works internally — none of it is needed just to use
+the app.
+
+### Building from source
 
 Requires an Apple Silicon Mac, [Homebrew](https://brew.sh) and [uv](https://docs.astral.sh/uv/).
 
@@ -91,7 +138,7 @@ in `~/.voooxly/venv`, copies `.env` and downloads the Whisper model to
 > **Why `~/.voooxly`?** venv and models live outside any iCloud-synced folder.
 > iCloud evicts large binaries and hangs builds — keep them out of Desktop/Documents.
 
-### macOS permissions (prompted on first run)
+#### macOS permissions (prompted on first run)
 - **Accessibility** — global hotkey + simulated Cmd+V paste.
 - **Microphone** — recording.
 - **Automation** — osascript pasting (first-time dialog).
@@ -126,7 +173,7 @@ happen to have, and a cloud-only default (like Ollama's `:cloud` models)
 would quietly fail for anyone without that subscription while reporting
 "connected".
 
-Connect your own from the menu bar — **AI engine → Connect…**:
+Connect your own from the menu bar — open **AI engine** and pick a provider:
 
 - **Ollama (local)** — if you have the Ollama app installed, Voooxly asks
   your own server which models it has and lets you pick one; no key needed.
@@ -191,13 +238,6 @@ Hard-won build gotchas:
 - The signing identifier must match the plist's CFBundleIdentifier or TCC won't
   associate permissions even with the toggle ON.
 
-### Roadmap
-
-Next up (1.1):
-
-- Edit Mode: select any text, speak an instruction, get it transformed.
-- Per-app modes and optional on-screen context for smarter cleanup.
-
 ### Project layout
 
 ```
@@ -208,6 +248,13 @@ config.yaml · scripts/ · docs/RELEASING.md
 `vendor/whisper/` is **not** in git: it holds whisper.cpp binaries vendored from
 Homebrew, and `scripts/bundle-whisper.sh` rebuilds it automatically before any
 build that needs it.
+
+### Roadmap
+
+Next up (1.1):
+
+- Edit Mode: select any text, speak an instruction, get it transformed.
+- Per-app modes and optional on-screen context for smarter cleanup.
 
 ## License
 
