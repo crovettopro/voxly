@@ -70,8 +70,15 @@ class DictationKey:
 
 
 # El orden es el del menú (orden de inserción): las derechas primero porque son
-# las recomendadas, las izquierdas después con el retardo escrito en la propia
-# etiqueta, y las funciones al final para quien tenga un teclado grande.
+# las recomendadas y las izquierdas después, con el retardo escrito en la propia
+# etiqueta.
+#
+# Solo los seis modificadores de la fila de abajo. Las F estuvieron aquí y se
+# retiraron: F13-F15 no existen en ningún teclado de portátil, así que a quien
+# abría el menú en un MacBook le sobraban cuatro filas de diez que no podía
+# pulsar — y una lista donde casi la mitad no funciona hace dudar del resto.
+# Siguen aceptándose por Custom… (ver _FUNCIONES), que es justo el sitio donde
+# las busca quien tiene un teclado que las trae.
 DICTATION_KEYS: dict[str, DictationKey] = {
     "cmd_r": DictationKey("cmd_r", "Right ⌘ (Command)", False),
     "alt_r": DictationKey("alt_r", "Right ⌥ (Option)", False),
@@ -79,10 +86,6 @@ DICTATION_KEYS: dict[str, DictationKey] = {
     "cmd_l": DictationKey("cmd_l", "Left ⌘ (Command) — 300 ms delay", True),
     "alt_l": DictationKey("alt_l", "Left ⌥ (Option) — 300 ms delay", True),
     "ctrl_l": DictationKey("ctrl_l", "Left ⌃ (Control) — 300 ms delay", True),
-    "f6": DictationKey("f6", "F6", False),
-    "f13": DictationKey("f13", "F13", False),
-    "f14": DictationKey("f14", "F14", False),
-    "f15": DictationKey("f15", "F15", False),
 }
 
 

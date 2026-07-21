@@ -10,10 +10,6 @@ función entera. Estos tests impiden que la API muerta vuelva a colarse.
 import re
 from pathlib import Path
 
-import pytest
-
-from voooxly import refine
-
 SRC = Path(__file__).resolve().parent.parent / "src" / "voooxly"
 
 
@@ -31,22 +27,7 @@ def test_no_queda_ningun_rumps_notification_en_el_codigo():
     )
 
 
-# --- health_summary: el texto que ve el usuario en "Backend status…" ---
-
-
-def test_health_summary_marca_disponibles_y_caidos(monkeypatch):
-    monkeypatch.setattr(refine, "health", lambda: {"ollama": True, "claude": False})
-    resumen = refine.health_summary()
-    assert "ollama" in resumen and "claude" in resumen
-    assert "✓" in resumen and "✗" in resumen
-
-
-def test_health_summary_con_todo_caido_no_lanza(monkeypatch):
-    monkeypatch.setattr(refine, "health", lambda: {"ollama": False})
-    assert "✗" in refine.health_summary()
-
-
-def test_health_summary_sin_backends_da_texto_util(monkeypatch):
-    """Un dict vacío no puede producir una cadena vacía: el usuario vería un modal en blanco."""
-    monkeypatch.setattr(refine, "health", lambda: {})
-    assert refine.health_summary().strip()
+# health_summary() y "Backend status…" se retiraron: el submenú AI engine ya
+# lleva el motor activo en su propio título ("AI engine — Groq"), así que el
+# modal decía lo mismo con jerga de backends. refine.health() sigue viva —
+# setup_checks y `launch.sh --check` la usan.

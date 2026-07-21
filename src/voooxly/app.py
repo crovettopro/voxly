@@ -92,6 +92,22 @@ def ai_engine_title(selection, detected: str) -> str:
     return f"AI engine — {label} (auto)"
 
 
+def custom_key_item(active_key: str) -> tuple[str, int]:
+    """(título, check) del item "Custom…" del submenú Dictation key.
+
+    A nivel de módulo por el mismo motivo que ai_menu_labels: instanciar
+    VoooxlyApp construye menús de AppKit y no corre en pytest.
+
+    Sin esto, una tecla fuera del catálogo deja el submenú ENTERO sin marcar y
+    parece que la app perdió el ajuste. Pasa de verdad: quien tuviera F13 —
+    que estuvo en el menú y ya no está — abre Dictation key tras actualizar y
+    no ve nada marcado, aunque su tecla siga funcionando perfectamente.
+    """
+    if active_key in keys.DICTATION_KEYS:
+        return "Custom…", 0
+    return f"Custom… ({active_key})", 1
+
+
 def apply_ai_selection(cfg, sel) -> None:
     """Aplica la elección al config VIVO (aquí sí toca: es configurar la app).
 
@@ -253,7 +269,6 @@ class VoooxlyApp(rumps.App):
         self.ai.add(self.ai_auto_item)
         self.ai_test_item = rumps.MenuItem("Test connection", callback=self._test_ai)
         self.ai.add(self.ai_test_item)
-        self.health = rumps.MenuItem("Backend status…", callback=self.show_health)
         self.stats_item = rumps.MenuItem("Usage stats…", callback=self._show_stats)
         self.quit = rumps.MenuItem("Quit Voooxly", callback=self._quit)
         # Oculto hasta que el comprobador encuentre una versión nueva (ver _warmup).
@@ -298,7 +313,9 @@ class VoooxlyApp(rumps.App):
             self.key_parent.add(mi)
             self.key_items[k] = mi
         self.key_parent.add(rumps.separator)
-        self.key_custom_item = rumps.MenuItem("Custom…", callback=self._pick_custom_key)
+        titulo_custom, check_custom = custom_key_item(self._dictation_key)
+        self.key_custom_item = rumps.MenuItem(titulo_custom, callback=self._pick_custom_key)
+        self.key_custom_item.state = check_custom
         self.key_parent.add(self.key_custom_item)
 
         self.style_parent = rumps.MenuItem("Dictation style")
@@ -322,7 +339,6 @@ class VoooxlyApp(rumps.App):
             rumps.separator,
             self.status,
             self.ai,
-            self.health,
             self.stats_item,
             settings,
             rumps.separator,
@@ -1169,6 +1185,9 @@ class VoooxlyApp(rumps.App):
                 self._toggle_mode = new_mode
             for k, mi in self.key_items.items():
                 mi.state = 1 if k == self._dictation_key else 0
+            self.key_custom_item.title, self.key_custom_item.state = custom_key_item(
+                self._dictation_key
+            )
             for m, mi in self.style_items.items():
                 mi.state = 1 if m == self._toggle_mode else 0
 
@@ -1406,11 +1425,6 @@ class VoooxlyApp(rumps.App):
 
     def _show_stats(self, _sender):
         self._alert("Your dictation stats", stats.summary())
-
-    def show_health(self, _sender):
-        msg = refine.health_summary()
-        self._alert("Backend status", msg)
-        self.status.title = msg
 
     def _quit(self, _sender):
         try:

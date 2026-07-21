@@ -41,6 +41,14 @@ class _HotkeyFalso:
         return True
 
 
+class _ItemFalso:
+    """Un NSMenuItem con lo justo: título y check, ambos escribibles."""
+
+    def __init__(self, title="Custom…", state=0):
+        self.title = title
+        self.state = state
+
+
 class _AppFalsa:
     """Doble mínimo: solo lo que _restart_hotkey lee o escribe."""
 
@@ -50,6 +58,7 @@ class _AppFalsa:
         self._toggle_mode = "hold"
         self.key_items = {}
         self.style_items = {}
+        self.key_custom_item = _ItemFalso()
 
     def _on_main(self, fn):
         # Igual que el _on_main real en el hilo principal: síncrono.
@@ -81,3 +90,20 @@ def test_restart_hotkey_funciona_normal_en_el_hilo_principal():
     aplicado = VoooxlyApp._restart_hotkey(fake, "f13", "hold")
     assert aplicado is True
     assert fake._dictation_key == "f13"
+
+
+def test_restart_hotkey_marca_custom_al_saltar_a_una_tecla_de_fuera_del_menu():
+    # f13 salió del catálogo: sin marcar Custom… el submenú se queda entero
+    # sin check y parece que no se aplicó nada.
+    fake = _AppFalsa()
+    VoooxlyApp._restart_hotkey(fake, "f13", "hold")
+    assert fake.key_custom_item.state == 1
+    assert "f13" in fake.key_custom_item.title
+
+
+def test_restart_hotkey_desmarca_custom_al_volver_al_catalogo():
+    fake = _AppFalsa()
+    VoooxlyApp._restart_hotkey(fake, "f13", "hold")
+    VoooxlyApp._restart_hotkey(fake, "alt_r", "hold")
+    assert fake.key_custom_item.state == 0
+    assert fake.key_custom_item.title == "Custom…"
