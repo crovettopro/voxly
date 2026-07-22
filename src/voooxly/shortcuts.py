@@ -184,41 +184,73 @@ _MODIFICADORES_SIN_LADO = {"cmd", "alt", "ctrl", "shift"}
 _MODIFICADORES_DERECHA = {"cmd_r", "alt_r", "ctrl_r", "shift_r"}
 
 
+def matched_keys(sid: str, names: list[str]) -> set[str]:
+    """Nombres canónicos de las teclas FÍSICAS que `hotkey.py` casa de
+    verdad en runtime para el atajo `sid` con `names` como binding actual.
+
+    Es el hecho único del que derivan tanto `side_hint()` (lo resume en una
+    palabra para la fila) como `lit_keys()` de settings_window.py (enciende
+    casillas con él): antes cada uno lo recalculaba a su manera y se podían
+    desincronizar — el bug real de la Task 9, con "shift" encendido en el
+    teclado y "shift_r" apagado mientras la fila decía "either side".
+
+    Cada nombre de `names` se traduce por separado con `keys.canon()`. Un
+    combo (len(names) != 1, como el ctrl+shift+m de cycle_mode) no ensancha
+    nada: hotkey.py:439 compara el conjunto de teclas pulsadas por IGUALDAD
+    exacta con el combo (`_combo_names`), no por prefijo, así que cada tecla
+    del combo casa solo su propio lado.
+
+    Con una tecla suelta (len(names) == 1), `latch` es el único que
+    ensancha: hotkey.py:421 casa por PREFIJO
+    (`name == self._latch_key or name.startswith(self._latch_key + "_")`).
+    Ese prefijo solo alarga el resultado cuando la tecla configurada es uno
+    de los cuatro modificadores SIN lado (`_MODIFICADORES_SIN_LADO`): el
+    único sufijo que pynput reporta de verdad para esos cuatro nombres es
+    "_r" (la izquierda ya llega colapsada en el nombre sin lado — ver
+    `keys._ALIAS_IZQUIERDA` — así que nunca hay un "<nombre>_l" que casar).
+    Una tecla que ya tiene lado propio (p.ej. cmd_r) no ensancha nada: no
+    existe un "cmd_r_algo" con el que el prefijo pueda seguir alargando.
+    Los otros tres atajos (dictation, cancel, cycle_mode de una sola tecla)
+    casan por igualdad exacta (hotkey.py:397 y :432), así que nunca ensanchan
+    pase lo que pase el nombre.
+    """
+    fuera: set[str] = set()
+    for n in names:
+        canon = keys.canon(n)
+        if not canon:
+            continue
+        fuera.add(canon)
+        if sid == "latch" and len(names) == 1 and canon in _MODIFICADORES_SIN_LADO:
+            fuera.add(canon + "_r")
+    return fuera
+
+
 def side_hint(sid: str, names: list[str]) -> str:
     """'right' / 'left' / 'either side' / '' — qué lado(s) de la tecla casan
     de VERDAD en runtime para el atajo `sid`, con `names` como binding actual.
 
     Vive aquí y no en settings_window.py porque es una decisión sobre
     semántica de atajos (qué hace hotkey.py con este nombre), no de pintado.
+    Deriva de `matched_keys()`: no repite su lógica de ensanchado, solo
+    traduce el CONJUNTO que esa función calcula a la palabra que se lee en
+    la fila. Así las dos vistas -el texto de la fila y las casillas
+    encendidas del teclado- son necesariamente la misma verdad.
 
     Un combo (len(names) != 1) no tiene lado: son varias teclas a la vez y
     ninguna combinación de manos es "la" respuesta — cycle_mode con su
     ctrl+shift+m de fábrica cae aquí.
 
-    Para una tecla suelta, dictation/cancel/cycle_mode-de-una-sola-tecla casan
-    por igualdad exacta (hotkey.py:397, :432, y el frozenset de
-    _cycle_combo): un nombre sin lado como "cmd" solo casa la Cmd IZQUIERDA,
-    nunca la derecha, así que ahí un modificador sin lado es simplemente
-    "left".
-
-    latch es el único que casa distinto: hotkey.py:421 usa
-    `name == self._latch_key or name.startswith(self._latch_key + "_")` — un
-    matcheo de PREFIJO. Ese prefijo solo ensancha el resultado cuando la
-    tecla configurada es uno de los cuatro modificadores SIN lado (porque
-    "shift_r" empieza por "shift_", pero nada empieza por "cmd_r_"): con el
-    shift de fábrica, "left" sería una mentira (el shift derecho también
-    fija), así que ahí toca decir "either side". Si latch se reasigna a una
-    tecla que YA tiene lado propio (p.ej. cmd_r), el prefijo no ensancha nada
-    y vuelve a ser side-specific igual que los otros tres atajos.
+    Una tecla suelta que no es ni un modificador sin lado ni uno con lado
+    propio (una letra, "esc", una F) no tiene lado que anunciar: "".
     """
     if len(names) != 1:
         return ""
     nombre = keys.canon(names[0])
-    if nombre in _MODIFICADORES_DERECHA:
-        return "right"
-    if nombre in _MODIFICADORES_SIN_LADO:
-        return "either side" if sid == "latch" else "left"
-    return ""
+    if nombre not in _MODIFICADORES_SIN_LADO and nombre not in _MODIFICADORES_DERECHA:
+        return ""
+    if len(matched_keys(sid, names)) > 1:
+        return "either side"
+    return "right" if nombre in _MODIFICADORES_DERECHA else "left"
 
 
 def _firma(names: list[str]) -> frozenset[str]:

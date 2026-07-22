@@ -38,6 +38,38 @@ def test_las_teclas_se_canonicalizan_antes_de_encenderse():
     assert "cmd" in lit
 
 
+def test_lit_keys_y_side_hint_cuentan_la_misma_verdad_sobre_los_lados():
+    """Defecto 1 de la Task 9: side_hint() (el texto de la fila) y lit_keys()
+    (las casillas que se encienden) eran dos implementaciones independientes
+    del mismo hecho runtime y se podían desincronizar. El bug real: con el
+    latch de fábrica (shift), la fila decía "either side" pero el teclado
+    solo encendía ⇧ izquierdo -shift_r se quedaba apagado-.
+
+    Las dos derivan ahora de shortcuts.matched_keys(), así que se atan aquí
+    de forma ESTRUCTURAL contra esa función, no contra un diccionario de
+    teclas encendidas clavado a mano: para cada atajo de una sola tecla, si
+    side_hint() dice "either side" tienen que estar encendidas las DOS
+    teclas de matched_keys() y solo ellas; si dice "right"/"left" tiene que
+    estar encendida esa única tecla. Sigue valiendo aunque mañana cambie
+    cuál es la tecla de fábrica de cualquiera de los cuatro atajos.
+    """
+    lit = settings_window.lit_keys(ESTADO)
+    for sid, fila in ESTADO.items():
+        nombres = list(fila.get("keys") or [])
+        if len(nombres) != 1:
+            continue  # los combos no tienen lado; side_hint devuelve ""
+        lado = shortcuts.side_hint(sid, nombres)
+        casadas = shortcuts.matched_keys(sid, nombres)
+        if lado == "either side":
+            assert len(casadas) == 2, (sid, casadas)
+        elif lado in ("right", "left"):
+            assert len(casadas) == 1, (sid, casadas)
+        else:
+            continue
+        for tecla in casadas:
+            assert lit.get(tecla) == sid, (sid, tecla, lit)
+
+
 def test_el_teclado_tiene_las_seis_filas_de_un_mac():
     assert len(settings_window.KEYBOARD_ROWS) == 6
 

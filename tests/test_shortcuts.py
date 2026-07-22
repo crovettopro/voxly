@@ -156,6 +156,35 @@ def test_side_hint_de_latch_reasignado_a_una_tecla_con_lado_ya_no_ensancha():
     assert shortcuts.side_hint("latch", ["cmd_r"]) == "right"
 
 
+def test_matched_keys_del_latch_de_fabrica_incluye_las_dos_manos():
+    # El hecho crudo detrás de side_hint("latch", ["shift"]) == "either side":
+    # hotkey.py:421 casa "shift" (igualdad) Y "shift_r" (prefijo). Las dos
+    # deben aparecer en el conjunto, canonicalizadas.
+    assert shortcuts.matched_keys("latch", ["shift"]) == {"shift", "shift_r"}
+
+
+def test_matched_keys_de_latch_con_lado_propio_no_ensancha():
+    assert shortcuts.matched_keys("latch", ["cmd_r"]) == {"cmd_r"}
+
+
+def test_matched_keys_fuera_de_latch_nunca_ensancha():
+    # dictation/cancel/cycle_mode casan por igualdad exacta (hotkey.py:397 y
+    # :432): un modificador sin lado ahí es SOLO la izquierda, nunca las dos.
+    assert shortcuts.matched_keys("dictation", ["cmd"]) == {"cmd"}
+    assert shortcuts.matched_keys("cancel", ["esc"]) == {"esc"}
+
+
+def test_matched_keys_de_un_combo_canonicaliza_cada_tecla_sin_ensanchar():
+    # ctrl+shift+m: hotkey.py:439 compara el conjunto pulsado por IGUALDAD
+    # con el combo entero, así que cada tecla casa solo su propio lado.
+    assert shortcuts.matched_keys("cycle_mode", ["ctrl", "shift", "m"]) == {"ctrl", "shift", "m"}
+
+
+def test_matched_keys_canonicaliza_cmd_l_a_cmd():
+    # cmd_l y cmd son la misma tecla física (pynput colapsa la izquierda).
+    assert shortcuts.matched_keys("dictation", ["cmd_l"]) == {"cmd"}
+
+
 def test_los_atajos_llevan_las_claves_exactas_esperadas():
     # Tareas posteriores leen esta forma: dictation lleva delay_ms y style, los
     # otros tres solo "keys". Esta prueba blinda esa forma contractual.

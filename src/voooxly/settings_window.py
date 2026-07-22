@@ -160,16 +160,21 @@ _PRIORIDAD = ("dictation", "cancel", "latch", "cycle_mode")
 def lit_keys(estado: dict) -> dict[str, str]:
     """{nombre canónico: sid} de las teclas que hay que encender.
 
-    Canonicaliza porque "cmd_l" y "cmd" son la misma casilla del teclado: sin
-    esto, elegir el ⌘ izquierdo dejaría su tecla apagada.
+    Deriva de shortcuts.matched_keys(), no de canonicalizar cada nombre a
+    mano: matched_keys() sabe que latch ensancha a la variante derecha
+    (hotkey.py:421 casa por prefijo) y side_label() cuenta exactamente la
+    misma historia (shortcuts.side_hint() usa la misma función). Antes de
+    este fix las dos vistas se calculaban por separado y se desincronizaban
+    -el bug real de la Task 9: "shift" encendido, "shift_r" apagado, la fila
+    diciendo "either side".
     """
-    from . import keys as _keys
-
     fuera: dict[str, str] = {}
     for sid in _PRIORIDAD:
-        for n in (estado.get(sid, {}) or {}).get("keys") or []:
-            canon = _keys.canon(n)
-            if canon and canon not in fuera:
+        nombres = list((estado.get(sid, {}) or {}).get("keys") or [])
+        if not nombres:
+            continue
+        for canon in shortcuts.matched_keys(sid, nombres):
+            if canon not in fuera:
                 fuera[canon] = sid
     return fuera
 
