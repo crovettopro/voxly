@@ -1,6 +1,6 @@
 [project]
 name = "voooxly"
-version = "1.1.0"
+version = "1.2.0"
 description = "Dictado local pro tipo Wispr Flow: STT on-device + LLM que ordena/mejora tus ideas, con modos."
 requires-python = ">=3.11"
 dependencies = [

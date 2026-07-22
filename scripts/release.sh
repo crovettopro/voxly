@@ -33,8 +33,23 @@ cd "$ROOT"
 # ---------- comprobaciones previas (fallar aquí es barato; a mitad de notarización no) ----------
 if [ "$DRY_RUN" = "1" ]; then
   # Ensayo: cualquier identidad local sirve para comprobar que el bucle de firma,
-  # el hdiutil y el DMG funcionan. El resultado NO es distribuible.
+  # dmgbuild y el DMG funcionan. El resultado NO es distribuible.
   IDENTITY="${RELEASE_IDENTITY:-Voooxly Dev}"
+  # El cert lo crea scripts/make-cert.sh. Si no está (p.ej. quedó el del nombre
+  # viejo del proyecto), se tira de cualquier otra identidad local ANUNCIÁNDOLO:
+  # descubrir esto tras un build entero de PyInstaller cuesta minutos.
+  if ! security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+    ALT="$(security find-identity -v -p codesigning 2>/dev/null \
+      | grep -v "Developer ID Application" | grep -o '"[^"]*"' | head -1 | tr -d '"' || true)"
+    if [ -z "$ALT" ]; then
+      echo "ERROR: no hay identidad de firma local para el ensayo."
+      echo "       Créala con: ./scripts/make-cert.sh"
+      exit 1
+    fi
+    echo "⚠️  No existe el certificado '$IDENTITY' — uso '$ALT' para el ensayo."
+    echo "    Para el nombre correcto: ./scripts/make-cert.sh"
+    IDENTITY="$ALT"
+  fi
   echo "⚠️  DRY RUN: firma con '$IDENTITY' y sin notarizar. El DMG no es distribuible."
 else
   IDENTITY="$(security find-identity -v -p codesigning \
