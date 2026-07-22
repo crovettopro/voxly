@@ -19,6 +19,8 @@ import math
 import objc
 from AppKit import (
     NSBackingStoreBuffered,
+    NSButton,
+    NSSlider,
     NSTextAlignmentCenter,
     NSTextAlignmentRight,
     NSView,
@@ -94,6 +96,24 @@ _LADO_GAP = 4       # hueco entre el keycap y la etiqueta de lado
 _LADO_MARGEN_D = 4  # hueco entre la etiqueta de lado y el borde de la fila
 _KEYCAP_W = 62
 _KEYCAP_H = 26
+
+# Leyenda del keycap mientras se captura. NO es "Press keys…": a 14pt (el
+# font del keycap) esa frase mide 84pt de ancho de verdad (theme.text_width)
+# y el keycap solo tiene 62pt — se recortaría en silencio, el mismo defecto
+# que _lado_ancho() ya evita más abajo. La instrucción completa ya está
+# siempre visible en la cabecera de la ventana ("Click a shortcut, then
+# press the keys you want to use."); aquí basta un indicador corto de "estoy
+# escuchando" que quepa de verdad en el keycap.
+_CAPTURANDO_TXT = "…"
+
+# Alto extra que gana la fila de Dictation para el slíder de delay (ver
+# _build_row): el contenido de siempre (título, subtítulo, keycap, lado) se
+# desplaza este mismo alto hacia arriba, así que ocupa exactamente el mismo
+# rectángulo que ocuparía en una fila normal de ROW_H, y el slíder vive en la
+# banda nueva que queda libre debajo, DENTRO del frame de la fila -no fuera
+# de él-, para que no invada la fila de abajo (ver el comentario largo en
+# _build_row).
+_DELAY_ROW_EXTRA_H = 24
 
 # Tamaño de la leyenda de cada casilla del teclado visual. 9pt le sobra hueco
 # incluso al texto más ancho ("F13") en la casilla más estrecha del teclado
@@ -187,6 +207,22 @@ KEYBOARD_ROWS: list[list[tuple[str, float]]] = [
 # es la que el usuario busca de un vistazo, y sin una regla explícita el color
 # dependería del orden de iteración del diccionario.
 _PRIORIDAD = ("dictation", "cancel", "latch", "cycle_mode")
+
+
+def delay_for(names: list[str], anterior_ms: int) -> int:
+    """Delay que le toca a una tecla recién capturada.
+
+    Sube al default SOLO si la tecla necesita guarda y el delay actual no la
+    protege: con el ⌘ izquierdo a 0 ms, cada ⌘C arranca una grabación. Si la
+    tecla no necesita guarda se conserva lo que hubiera — subir a 400 a quien
+    eligió el ⌘ derecho le cambiaría el tacto de la app sin pedirlo, y bajarle
+    un 600 puesto a mano le pisaría su elección.
+    """
+    from . import keys as _keys
+
+    if names and _keys.needs_guard(names[0]) and anterior_ms <= 0:
+        return shortcuts.DEFAULT_DELAY_MS
+    return anterior_ms
 
 
 def lit_keys(estado: dict) -> dict[str, str]:
@@ -292,12 +328,36 @@ class ShortcutsController(NSObject):
         self._estado = {sid: dict(fila) for sid, fila in estado.items()}
         self._on_change = on_change
         self._rows = {}          # sid → NSView de la fila
-        self._keycaps = {}       # sid → NSTextField del keycap
+        self._keycaps = {}       # sid → NSView del keycap (theme.keycap)
+        self._keycap_labels = {}  # sid → NSTextField interno del keycap (su texto)
         self._sides = {}         # sid → NSTextField del lado
+        self._fila_boton = {}    # sid → NSButton invisible que arma la captura
         self._teclado_marco = None  # NSView del fondo del teclado (tests de geometría)
         self._nota_huerfana = None  # NSTextField de la fila huérfana, si la hay
+        self._capturing = None    # sid en captura, o None
+        self._error_text = ""
+        self._error = None        # NSTextField del mensaje de error de la fila
+        self._slider = None       # NSSlider del delay de Dictation
+        # HotkeyManager real, si lo hay: lo conecta quien wire esta ventana en
+        # el menú de la app (Task 11) con attachHotkey_(). None en los tests
+        # (y en verificar-ventana.py) — sin él, begin_capture_/cancel_capture_
+        # solo mueven el estado de la ventana, sin tocar pynput.
+        self._hotkey = None
         self._build()
         return self
+
+    # ---------- hotkey real (pynput) ----------
+    def attachHotkey_(self, hotkey):
+        """Conecta el HotkeyManager de verdad que ya está corriendo.
+
+        Nunca instancia ni arranca un HotkeyManager: usa el que le pasan.
+        Solo puede haber un keyboard.Listener en el proceso (dos hacen que
+        pynput llame a TIS/TSM desde dos hilos y HIToolbox aborta con
+        SIGABRT) — begin_capture()/end_capture() del que ya corre solo
+        cambian a qué callback van las pulsaciones, no crean ni reinician el
+        listener.
+        """
+        self._hotkey = hotkey
 
     def _build(self):
         self._win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -329,24 +389,49 @@ class ShortcutsController(NSObject):
         self._paint_keyboard()
 
         top = 330   # el teclado de la Task 9 ocupa de 84 a 312
-        for sid in shortcuts.SHORTCUTS:
+        for sid, sc in shortcuts.SHORTCUTS.items():
+            # Dictation es la única fila con slíder (sc.has_delay) y necesita
+            # _DELAY_ROW_EXTRA_H de más para que quepa DENTRO de su propio
+            # frame (ver _build_row); las demás se quedan en ROW_H. Sumar el
+            # mismo alto que de verdad se usó al avanzar `top` es lo que
+            # impide que la fila siguiente invada ese espacio de más.
+            alto_fila = ROW_H + _DELAY_ROW_EXTRA_H if sc.has_delay else ROW_H
             fila = self._build_row(
-                sid, NSMakeRect(PAD, y_(top, ROW_H), W - PAD * 2, ROW_H), lado_font, lado_w)
+                sid, NSMakeRect(PAD, y_(top, alto_fila), W - PAD * 2, alto_fila),
+                lado_font, lado_w)
             content.addSubview_(fila)
             self._rows[sid] = fila
             content.addSubview_(theme.rule(
-                NSMakeRect(PAD, y_(top + ROW_H, 1), W - PAD * 2, 1), theme.HAIRLINE))
-            top += ROW_H + 1
+                NSMakeRect(PAD, y_(top + alto_fila, 1), W - PAD * 2, 1), theme.HAIRLINE))
+            top += alto_fila + 1
+
+        # Mensaje de error/aviso de la fila en captura (shortcuts.validate()
+        # o el rechazo del llamador vía on_change). Uno solo para toda la
+        # ventana: como solo una fila puede estar en captura a la vez, el
+        # mensaje siempre pertenece a esa fila aunque el campo viva fuera de
+        # su rectángulo.
+        self._error = theme.label(
+            NSMakeRect(PAD, y_(H - 46, 17), W - PAD * 2, 17),
+            "", theme.sf(11.5), theme.TEAL_DARK)
+        content.addSubview_(self._error)
 
     def _build_row(self, sid, frame, lado_font, lado_w):
         sc = shortcuts.SHORTCUTS[sid]
         row = NSView.alloc().initWithFrame_(frame)
         rw = frame.size.width
 
+        # Solo Dictation desplaza su contenido: el resto de filas mide
+        # ROW_H (dy=0, sin cambios). Con dy=_DELAY_ROW_EXTRA_H, el título/
+        # subtítulo/keycap/lado terminan EXACTAMENTE donde estarían en una
+        # fila normal de ROW_H (el frame creció por abajo, no por arriba: ver
+        # _build), y la banda [0, dy) que queda libre debajo es donde vive el
+        # slíder — dentro del frame de la fila, no fuera de él.
+        dy = _DELAY_ROW_EXTRA_H if sc.has_delay else 0
+
         row.addSubview_(theme.label(
-            NSMakeRect(0, 24, rw - 150, 17), sc.label, theme.sf(13.5, 0.3), theme.INK))
+            NSMakeRect(0, 24 + dy, rw - 150, 17), sc.label, theme.sf(13.5, 0.3), theme.INK))
         row.addSubview_(theme.label(
-            NSMakeRect(0, 6, rw - 150, 16), sc.subtitle, theme.sf(11.5), theme.INK_MUTED))
+            NSMakeRect(0, 6 + dy, rw - 150, 16), sc.subtitle, theme.sf(11.5), theme.INK_MUTED))
 
         nombres = list(self._estado.get(sid, {}).get("keys") or [])
 
@@ -359,16 +444,66 @@ class ShortcutsController(NSObject):
         lado_x = rw - _LADO_MARGEN_D - lado_w
         cap_x = lado_x - _LADO_GAP - _KEYCAP_W
 
-        cap = theme.keycap(NSMakeRect(cap_x, 12, _KEYCAP_W, _KEYCAP_H),
+        cap = theme.keycap(NSMakeRect(cap_x, 12 + dy, _KEYCAP_W, _KEYCAP_H),
                            key_label(nombres), theme.sf(14, 0.3), 7)
         row.addSubview_(cap)
         self._keycaps[sid] = cap
+        # theme.keycap() devuelve el CONTENEDOR (el propio keycap dibujado,
+        # con su capa/borde), no el NSTextField del glifo — ese vive como su
+        # única subvista. _refresh_row necesita escribir el TEXTO durante la
+        # captura, así que guarda también una referencia directa a esa
+        # subvista en vez de intentar setStringValue_ sobre el contenedor
+        # (que no lo tiene y revienta con AttributeError).
+        self._keycap_labels[sid] = cap.subviews()[0]
 
-        lado = theme.label(NSMakeRect(lado_x, 17, lado_w, _LADO_ALTO),
+        lado = theme.label(NSMakeRect(lado_x, 17 + dy, lado_w, _LADO_ALTO),
                            side_label(sid, nombres),
                            lado_font, theme.INK_MUTED)
         row.addSubview_(lado)
         self._sides[sid] = lado
+
+        # Toda la fila arma la captura al pulsarla (Task 10: "clicking a row
+        # starts key capture"), no solo el keycap — un botón invisible del
+        # tamaño de la banda de contenido (0..ROW_H, nunca la banda del
+        # slíder) puesto ENCIMA de las etiquetas para recibir el click. Se
+        # añade antes que el slíder (más abajo) para que este quede por
+        # delante en esa banda si algún día se solapasen; hoy no lo hacen
+        # -viven en bandas [0,dy) y [dy,dy+ROW_H) disjuntas- así que el orden
+        # es solo cinturón y tirantes.
+        boton = NSButton.alloc().initWithFrame_(NSMakeRect(0, dy, rw, ROW_H))
+        boton.setBordered_(False)
+        boton.setBezelStyle_(0)
+        boton.setTitle_("")
+        boton.setTarget_(self)
+        boton.setAction_("filaClicked:")
+        row.addSubview_(boton)
+        self._fila_boton[sid] = boton
+
+        if sc.has_delay:
+            # macOS 26 (Darwin 25, el mismo que obligó a NSWindow en vez de
+            # NSPanel) dibuja un NSSlider recién creado como el pomo solo,
+            # SIN el surco: verificado con screencapture, un círculo blanco
+            # flotando bajo "Hold to talk" y ni rastro de pista aunque se
+            # mire pixel a pixel. stringValue()/doubleValue() sí funcionan
+            # -el control responde-, solo su dibujado nativo no se ve. Una
+            # pista propia, dibujada a mano y por DEBAJO del NSSlider real
+            # (que sigue siendo el que recibe el arrastre), deja esto legible
+            # sin depender de que AppKit pinte lo que promete.
+            pista_y = 2 + 9   # centro vertical del slíder (alto 20, y=2)
+            pista = theme.rule(NSMakeRect(6, pista_y, 168, 2), theme.BTN_BORDER)
+            row.addSubview_(pista)
+
+            sl = NSSlider.alloc().initWithFrame_(NSMakeRect(0, 2, 180, 20))
+            sl.setMinValue_(0.0)
+            sl.setMaxValue_(float(shortcuts.MAX_DELAY_MS))
+            sl.setNumberOfTickMarks_(5)          # 0 / 200 / 400 / 600 / 800
+            sl.setAllowsTickMarkValuesOnly_(True)
+            sl.setDoubleValue_(float(self._estado.get(sid, {}).get("delay_ms") or 0))
+            sl.setTarget_(self)
+            sl.setAction_("sliderMoved:")
+            row.addSubview_(sl)
+            self._slider = sl
+
         return row
 
     def _build_keyboard(self, content, top, height):
@@ -508,6 +643,150 @@ class ShortcutsController(NSObject):
                 if leyenda is not None:
                     leyenda.setTextColor_(theme.INK_KEYCAP)
 
+    # ---------- captura ----------
+    def filaClicked_(self, sender):
+        """Acción del botón invisible de cada fila: clicar en cualquier
+        punto de la fila (no solo el keycap) arma su captura."""
+        for sid, boton in self._fila_boton.items():
+            if boton is sender:
+                self.begin_capture_(sid)
+                return
+
+    @objc.python_method
+    def begin_capture_(self, sid):
+        """Arma la fila `sid` para recibir la próxima combinación.
+
+        @objc.python_method: sin él, PyObjC lee el nombre como el selector
+        Objective-C "begin:capture:" (CADA guion bajo -no solo el final- abre
+        un keyword nuevo; ver default_selector en objc/_transform.py) y
+        `objc.BadPrototypeError` revienta al definir la clase, porque ese
+        selector pide 2 argumentos y el método solo recibe uno (`sid`). Nada
+        de esta ventana invoca estos cuatro métodos vía un target/action de
+        Cocoa -los llama solo Python (los tests, filaClicked_,
+        _on_captured_)-, así que no necesitan ser selectores de verdad.
+
+        Si hay un HotkeyManager real conectado (attachHotkey_), desvía
+        también las pulsaciones globales hacia _on_captured_: es la única
+        vía de captura, reutiliza el begin_capture() del listener que ya
+        corre en vez de crear uno propio (ver attachHotkey_).
+        """
+        anterior = self._capturing
+        self._capturing = sid
+        self._error_text = ""
+        if anterior and anterior != sid:
+            # Cambiar de fila a mitad de captura no puede dejar el keycap
+            # anterior encallado en "…": esa fila ya no es la que se está
+            # capturando y tiene que volver a mostrar su tecla de verdad.
+            self._refresh_row(anterior)
+        self._refresh_row(sid)
+        if self._hotkey is not None:
+            self._hotkey.begin_capture(self._on_captured_)
+
+    @objc.python_method
+    def cancel_capture_(self):
+        """Esc durante la captura: deja el atajo como estaba (convención de
+        macOS). También lo llama el cierre de la ventana."""
+        sid, self._capturing = self._capturing, None
+        self._error_text = ""
+        if self._hotkey is not None:
+            self._hotkey.end_capture()
+        if sid:
+            self._refresh_row(sid)
+
+    @objc.python_method
+    def _on_captured_(self, names):
+        """El `cb` de verdad que hotkey.begin_capture() invoca. Llega por el
+        hilo del listener de pynput, nunca el principal — tocar AppKit aquí
+        directamente es el SIGTRAP/EXC_BREAKPOINT de siempre, así que todo lo
+        que sigue pasa por AppHelper.callAfter.
+
+        Esc aborta la captura en vez de ofrecerse como tecla nueva (la misma
+        convención que documenta cancel_capture_): sin este corte, "cancel"
+        -que ya es esc de fábrica- sería el único atajo que se puede
+        reasignar con Esc, y en cualquier otra fila un Esc de pánico se
+        leería como un intento de asignación en vez de como "olvídalo".
+        """
+        from PyObjCTools import AppHelper
+
+        if names and names[-1] == "esc":
+            AppHelper.callAfter(self.cancel_capture_)
+            return
+        AppHelper.callAfter(self.apply_capture_, list(names))
+
+    @objc.python_method
+    def apply_capture_(self, names):
+        """Valida y aplica lo capturado. No aplica nada que no pase por
+        shortcuts.validate() ni que el llamador rechace."""
+        sid = self._capturing
+        if not sid:
+            return
+        ok, msg = shortcuts.validate(sid, list(names), self._estado)
+        if not ok:
+            self._error_text = msg
+            self._refresh_row(sid)
+            return
+
+        fila = dict(self._estado.get(sid, {}))
+        fila["keys"] = list(names)
+        if shortcuts.SHORTCUTS[sid].has_delay:
+            fila["delay_ms"] = delay_for(list(names), int(fila.get("delay_ms") or 0))
+
+        aplicado, aviso = self._on_change(sid, fila)
+        if not aplicado:
+            # El hotkey rechazó el cambio: el estado de la ventana refleja lo
+            # que suena de verdad, nunca lo que se pidió.
+            self._error_text = aviso
+            self._refresh_row(sid)
+            return
+
+        self._estado[sid] = fila
+        self._capturing = None
+        self._error_text = aviso or msg    # msg puede traer el aviso de F5
+        if self._hotkey is not None:
+            self._hotkey.end_capture()
+        self._refresh_row(sid)
+        self._paint_keyboard()
+        if fila.get("delay_ms") is not None and self._slider is not None and sid == "dictation":
+            self._slider.setDoubleValue_(float(fila["delay_ms"]))
+
+    @objc.python_method
+    def set_delay_(self, ms):
+        """El slíder. Solo Dictation lo tiene (shortcuts.SHORTCUTS[…].has_delay)."""
+        ms = max(0, min(shortcuts.MAX_DELAY_MS, int(ms)))
+        fila = dict(self._estado.get("dictation", {}))
+        fila["delay_ms"] = ms
+        aplicado, aviso = self._on_change("dictation", fila)
+        if not aplicado:
+            self._error_text = aviso
+            return
+        self._estado["dictation"] = fila
+        self._refresh_row("dictation")
+
+    def sliderMoved_(self, sender):
+        self.set_delay_(int(round(sender.doubleValue())))
+
+    def _refresh_row(self, sid):
+        """Repinta el keycap, el lado y el mensaje de una fila.
+
+        DEBE correr en el hilo principal: apply_capture_ lo llama desde el
+        callback de captura, que llega por el hilo del listener de pynput.
+        Escribir en AppKit desde ahí es el SIGTRAP de siempre.
+        """
+        nombres = list(self._estado.get(sid, {}).get("keys") or [])
+        capturando = self._capturing == sid
+        cap = self._keycaps.get(sid)
+        etiqueta = self._keycap_labels.get(sid)
+        if etiqueta is not None:
+            etiqueta.setStringValue_(_CAPTURANDO_TXT if capturando else key_label(nombres))
+        if cap is not None:
+            cap.layer().setBorderColor_(
+                (theme.TEAL if capturando else theme.KEYCAP_EDGE).CGColor())
+        lado = self._sides.get(sid)
+        if lado is not None:
+            lado.setStringValue_(side_label(sid, nombres))
+        if self._error is not None:
+            self._error.setStringValue_(self._error_text)
+
     # ---------- ciclo de vida ----------
     def show(self):
         self._win.makeKeyAndOrderFront_(None)
@@ -520,4 +799,8 @@ class ShortcutsController(NSObject):
             log.debug("close() de la ventana de Shortcuts falló", exc_info=True)
 
     def windowShouldClose_(self, _sender):
+        # Cerrar la ventana a mitad de captura no puede dejar el listener de
+        # pynput desviado para siempre hacia una ventana que ya no existe.
+        if self._capturing:
+            self.cancel_capture_()
         return True
