@@ -1,15 +1,15 @@
-"""Registro de atajos, su resolución y sus conflictos.
+"""Registro de atajos, su resolucion y sus conflictos.
 
-Un módulo de datos, sin AppKit y sin pynput, por el mismo motivo que keys.py:
+Un modulo de datos, sin AppKit y sin pynput, por el mismo motivo que keys.py:
 instanciar la ventana de Shortcuts construye AppKit y no se puede hacer en un
-test. Aquí vive toda la lógica que se puede verificar; settings_window.py solo
+test. Aqui vive toda la logica que se puede verificar; settings_window.py solo
 pinta lo que esto decide.
 
-La resolución es la parte delicada. config.yaml es el valor de fábrica y
-prefs.json lo que eligió el usuario, y ninguno de los dos puede dejar la app
+La resolucion es la parte delicada. config.yaml es el valor de fabrica y
+prefs.json lo que eligio el usuario, y ninguno de los dos puede dejar la app
 sin atajos: los dos los edita gente a mano y un tipo equivocado es un error de
 tecleo, no un caso de laboratorio. Todo lo que no pasa validate_custom cae al
-default en silencio, igual que hacía keys.resolve().
+default en silencio, igual que hacia keys.resolve().
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from dataclasses import dataclass
 
 from . import keys
 
-# Rango del slíder de la ventana. El default NO se aplica a todo el mundo: solo
+# Rango del slider de la ventana. El default NO se aplica a todo el mundo: solo
 # aparece cuando la tecla elegida necesita guarda (ver _delay_seguro). Poner
-# 400 ms de fábrica al ⌘ derecho le metería 0,4 s de espera al arranque de
-# dictado a todos los usuarios actuales, que perderían las primeras sílabas.
+# 400 ms de fabrica al cmd derecho le meteria 0,4 s de espera al arranque de
+# dictado a todos los usuarios actuales, que perderian las primeras silabas.
 DEFAULT_DELAY_MS = 400
 MAX_DELAY_MS = 800
 
@@ -31,8 +31,8 @@ DEFAULT_STYLE = "hold"
 @dataclass(frozen=True)
 class Shortcut:
     id: str                    # API estable, no renombrar
-    label: str                 # UI, en inglés
-    subtitle: str              # UI, en inglés
+    label: str                 # UI, en ingles
+    subtitle: str              # UI, en ingles
     default: tuple[str, ...]   # nombres pynput
     has_delay: bool
 
@@ -53,7 +53,7 @@ SHORTCUTS: dict[str, Shortcut] = {
         ("esc",), False),
 }
 
-# De dónde sale el valor de fábrica de cada atajo en config.yaml.
+# De donde sale el valor de fabrica de cada atajo en config.yaml.
 _RUTA_YAML = {
     "dictation": "hotkeys.toggle",
     "cycle_mode": "hotkeys.cycle_mode",
@@ -63,7 +63,7 @@ _RUTA_YAML = {
 
 
 def _teclas_validas(valor) -> list[str] | None:
-    """¿`valor` es una lista de nombres de tecla usable? None si no."""
+    """Es valor una lista de nombres de tecla usable? None si no."""
     if not isinstance(valor, list) or not valor:
         return None
     fuera = []
@@ -74,10 +74,10 @@ def _teclas_validas(valor) -> list[str] | None:
         if not n:
             return None
         fuera.append(n)
-    # Los combos de múltiples teclas (como ctrl+shift+m) se devuelven sin
+    # Los combos de multiples teclas (como ctrl+shift+m) se devuelven sin
     # validar: un modificador sin lado como 'ctrl' es ilegal como tecla de
-    # dictado suelta (validate_custom lo rechaza) pero perfectamente legítimo
-    # en un combo. Solo las teclas individuales necesitan validación.
+    # dictado suelta (validate_custom lo rechaza) pero perfectamente legitimo
+    # en un combo. Solo las teclas individuales necesitan validacion.
     if len(fuera) == 1:
         return fuera if keys.validate_custom(fuera[0])[0] else None
     return fuera
@@ -87,7 +87,7 @@ def _delay_seguro(valor, teclas: list[str]) -> int:
     """Delay en ms, recortado al rango y con un default que no rompe nada.
 
     Si el valor no es usable, el fallback NO es 0: con una tecla que necesita
-    guarda, 0 ms significa que cada ⌘C arranca una grabación. Se cae al
+    guarda, 0 ms significa que cada cmd+C arranca una grabacion. Se cae al
     default (400) cuando hace falta guarda y a 0 cuando no.
     """
     if isinstance(valor, bool) or not isinstance(valor, (int, float)):
@@ -100,9 +100,9 @@ def _delay_seguro(valor, teclas: list[str]) -> int:
 def resolve(prefs: dict, cfg) -> dict[str, dict]:
     """Estado efectivo de los cuatro atajos: prefs por encima del YAML.
 
-    Devuelve {sid: {"keys": [...]}}, más "delay_ms" y "style" solo en dictation
-    (que es el único con has_delay=True). Los otros tres (cycle_mode, latch, cancel)
-    llevan solo "keys".
+    Devuelve {sid: {keys: [...]}}, mas delay_ms y style solo en dictation
+    (que es el unico con has_delay=True). Los otros tres (cycle_mode, latch, cancel)
+    llevan solo keys.
     """
     guardado = prefs.get("shortcuts") if isinstance(prefs, dict) else None
     if not isinstance(guardado, dict):
@@ -143,14 +143,14 @@ _DELAY_HEREDADO_MS = 300
 
 
 def migrate(prefs: dict) -> bool:
-    """Traduce el formato de v1.3.0 al bloque `shortcuts`. Muta `prefs`.
+    """Traduce el formato de v1.3.0 al bloque shortcuts. Muta prefs.
 
-    Solo migra `dictation`: los otros tres nunca fueron configurables, así que
+    Solo migra dictation: los otros tres nunca fueron configurables, asi que
     resolve() ya les da el default correcto sin ayuda.
 
-    Las claves viejas se dejan escritas a propósito. Si el usuario vuelve a
-    una versión anterior, se las encuentra intactas; y si no vuelve, en dos
-    versiones se limpian. Borrarlas aquí haría el downgrade destructivo.
+    Las claves viejas se dejan escritas a proposito. Si el usuario vuelve a
+    una version anterior, se las encuentra intactas; y si no vuelve, en dos
+    versiones se limpian. Borrarlas aqui haria el downgrade destructivo.
     """
     if not isinstance(prefs, dict):
         return False
@@ -170,3 +170,45 @@ def migrate(prefs: dict) -> bool:
 
     prefs["shortcuts"] = {"dictation": fila}
     return True
+
+
+def _firma(names: list[str]) -> frozenset[str]:
+    """Conjunto canonico de un binding, para comparar dos atajos.
+
+    Canonicalizado a proposito: cmd_l y cmd son la misma tecla fisica en
+    macOS y compararlos como strings crudos dejaria pasar la colision.
+    """
+    return frozenset(keys.canon(n) for n in names)
+
+
+def validate(sid: str, names: list[str], actuales: dict[str, dict]) -> tuple[bool, str]:
+    """Se puede asignar names a sid? Devuelve (ok, mensaje).
+
+    El mensaje va en INGLES: sale tal cual en la fila de la ventana. Cuando
+    ok es True el mensaje puede traer un aviso (F5) - es informativo, no un
+    rechazo, porque elegir F5 es legitimo aunque sea mala idea.
+    """
+    if not names:
+        return False, "Press the keys you want to use."
+
+    mia = _firma(names)
+    for otro_sid, fila in actuales.items():
+        if otro_sid == sid or otro_sid not in SHORTCUTS:
+            continue
+        other_keys = fila.get("keys")
+        if other_keys is None:
+            other_keys = []
+        if _firma(list(other_keys)) == mia:
+            label = SHORTCUTS[otro_sid].label
+            msg = 'That shortcut is already used by "' + label + '". Pick another one.'
+            return False, msg
+
+    if len(names) == 1:
+        ok, msg = keys.validate_custom(names[0])
+        if not ok:
+            return False, msg
+
+    if "f5" in {n.lower() for n in names}:
+        msg = "Heads up: F5 is the macOS Dictation key, so macOS may react to it too."
+        return True, msg
+    return True, ""
