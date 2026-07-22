@@ -242,7 +242,7 @@ class ShortcutsController(NSObject):
         self._build_keyboard(content, top=84, height=228)
         self._paint_keyboard()
 
-        top = 330   # el teclado de la Task 9 ocupa de 84 a 320
+        top = 330   # el teclado de la Task 9 ocupa de 84 a 312
         for sid in shortcuts.SHORTCUTS:
             fila = self._build_row(
                 sid, NSMakeRect(PAD, y_(top, ROW_H), W - PAD * 2, ROW_H), lado_font, lado_w)
