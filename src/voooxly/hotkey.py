@@ -183,6 +183,12 @@ class HotkeyManager:
         # ventana dispararía un on_stop() de una grabación que nunca arrancó.
         self._started = False
 
+        # Modo captura: mientras hay callback, _on_press desvía todo aquí y no
+        # dispara ninguna acción. Sirve a la ventana de Shortcuts SIN crear un
+        # segundo listener, que abortaría el proceso (ver el header).
+        self._capture_cb = None
+        self._capture_orden: list[str] = []
+
     # --- ventana de decisión ---
     def _arm_guard(self) -> None:
         with self._guard_lock:
@@ -309,11 +315,57 @@ class HotkeyManager:
         log.info("Atajo %s reasignado a %s.", sid, canon)
         return True
 
+    # --- modo captura (ventana de Shortcuts) ---
+    @property
+    def capturing(self) -> bool:
+        return self._capture_cb is not None
+
+    def begin_capture(self, cb) -> None:
+        """Desvía las pulsaciones a `cb` y deja de disparar acciones.
+
+        `cb` recibe la lista de nombres pulsados hasta ahora, en orden de
+        pulsación, con los mismos nombres que _norm() reporta en runtime — que
+        es justo lo que hace que la tecla elegida case luego de verdad.
+        """
+        self._cancel_guard()
+        self._held = False
+        self._started = False
+        self._latched = False
+        with self._pressed_lock:
+            self._pressed.clear()
+        self._capture_orden = []
+        self._capture_cb = cb
+
+    def end_capture(self) -> None:
+        """Vuelve al comportamiento normal. Idempotente a propósito: cerrar la
+        ventana a mitad de captura también llama aquí, y quedarse sin
+        restaurar dejaría la app sin hotkeys hasta reiniciar."""
+        self._capture_cb = None
+        self._capture_orden = []
+        with self._pressed_lock:
+            self._pressed.clear()
+
     # --- listener callbacks ---
     def _on_press(self, key):
         name = _norm(key)
         if not name:
             return
+
+        # Captura: se traga el evento entero. Va antes que nada para que ni el
+        # dictado, ni el latch, ni los combos vean la tecla — elegir el ⌘
+        # derecho como tecla de dictado no puede ponerse a grabar.
+        cb = self._capture_cb
+        if cb is not None:
+            if name not in self._capture_orden:
+                self._capture_orden.append(name)
+            try:
+                cb(list(self._capture_orden))
+            except Exception:
+                # El callback es código de AppKit: si revienta, la app no
+                # puede quedarse sin hotkeys para siempre.
+                log.exception("El callback de captura falló")
+            return
+
         with self._pressed_lock:
             already = name in self._pressed
             self._pressed.add(name)
@@ -384,6 +436,8 @@ class HotkeyManager:
     def _on_release(self, key):
         name = _norm(key)
         if not name:
+            return
+        if self._capture_cb is not None:
             return
         with self._pressed_lock:
             self._pressed.discard(name)
