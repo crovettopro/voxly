@@ -106,6 +106,69 @@ def side_label(sid: str, names: list[str]) -> str:
     return shortcuts.side_hint(sid, names)
 
 
+# Teclado de un MacBook, por filas. (nombre pynput o "" si no es asignable,
+# ancho relativo). El nombre "" son teclas de relleno: se dibujan para que el
+# teclado se reconozca de un vistazo, pero nunca se encienden.
+#
+# Las letras y dígitos se nombran (con el char en minúscula que reporta
+# hotkey._norm) y no solo "m": shortcuts.py no restringe qué tecla puede
+# entrar en un combo de varias teclas (solo valida la tecla suelta), así que
+# cycle_mode se puede reasignar a cualquier ctrl+alt+<letra> — si el teclado
+# solo supiera encender "m", esa reasignación se vería en la fila pero nunca
+# en el dibujo, rompiendo la regla de que las dos vistas son la misma verdad.
+# La puntuación (-, =, [, ], \, ;, ', ,, ., /) se deja sin nombrar: hoy nadie
+# la puede asignar y no vale la pena el ruido visual por una tecla que nunca
+# se va a encender.
+KEYBOARD_ROWS: list[list[tuple[str, float]]] = [
+    [("esc", 1.4)] + [(f"f{i}", 1.0) for i in range(1, 13)] + [("f13", 1.0)],
+    [(d, 1.0) for d in "1234567890"] + [("", 1.0)] * 3 + [("backspace", 1.5)],
+    [("tab", 1.5)] + [(c, 1.0) for c in "qwertyuiop"] + [("", 1.0)] * 2 + [("", 1.2)],
+    [("", 1.7)] + [(c, 1.0) for c in "asdfghjkl"] + [("", 1.0)] * 2 + [("enter", 1.6)],
+    [("shift", 2.2)] + [(c, 1.0) for c in "zxcvbnm"] + [("", 1.0)] * 3 + [("shift_r", 2.2)],
+    [("", 1.1), ("ctrl", 1.1), ("alt", 1.1), ("cmd", 1.4), ("space", 5.6),
+     ("cmd_r", 1.4), ("alt_r", 1.1), ("", 2.2)],
+]
+
+# Quién gana cuando dos atajos comparten una tecla física. Dictation primero:
+# es la que el usuario busca de un vistazo, y sin una regla explícita el color
+# dependería del orden de iteración del diccionario.
+_PRIORIDAD = ("dictation", "cancel", "latch", "cycle_mode")
+
+
+def lit_keys(estado: dict) -> dict[str, str]:
+    """{nombre canónico: sid} de las teclas que hay que encender.
+
+    Canonicaliza porque "cmd_l" y "cmd" son la misma casilla del teclado: sin
+    esto, elegir el ⌘ izquierdo dejaría su tecla apagada.
+    """
+    from . import keys as _keys
+
+    fuera: dict[str, str] = {}
+    for sid in _PRIORIDAD:
+        for n in (estado.get(sid, {}) or {}).get("keys") or []:
+            canon = _keys.canon(n)
+            if canon and canon not in fuera:
+                fuera[canon] = sid
+    return fuera
+
+
+def _apagar(casilla):
+    """Deja una casilla del teclado en su color base (sin asignar).
+
+    Función de módulo, no método: un nombre con un solo guion bajo inicial y
+    ninguno más ("_apagar") es, para el transformador de selectores de
+    PyObjC, indistinguible de un selector Objective-C de CERO argumentos
+    (`default_selector` solo trata el método como Python puro cuando lleva
+    OTRO guion bajo además del inicial, o termina en uno). Como método de
+    ShortcutsController con un argumento (`casilla`) revienta al definir la
+    clase con `objc.BadPrototypeError: '_apagar' expects 0 arguments`. Fuera
+    de la clase no hay transformación de selector que lo confunda.
+    """
+    casilla.layer().setBackgroundColor_(theme.KEYCAP_BG2.CGColor())
+    casilla.layer().setBorderWidth_(1.0)
+    casilla.layer().setBorderColor_(theme.HAIRLINE.CGColor())
+
+
 class ShortcutsController(NSObject):
     """Controlador + ventana. Subclase de NSObject para ser target de los
     botones y delegate de la ventana."""
@@ -145,6 +208,10 @@ class ShortcutsController(NSObject):
 
         lado_font = theme.mono(9.5)
         lado_w = _lado_ancho(lado_font)   # una sola vez: mismo ancho en las 4 filas
+
+        self._keys = {}          # nombre → NSView de la casilla
+        self._build_keyboard(content, top=84, height=228)
+        self._paint_keyboard()
 
         top = 330   # el teclado de la Task 9 ocupa de 84 a 320
         for sid in shortcuts.SHORTCUTS:
@@ -188,6 +255,56 @@ class ShortcutsController(NSObject):
         row.addSubview_(lado)
         self._sides[sid] = lado
         return row
+
+    def _build_keyboard(self, content, top, height):
+        """Dibuja el teclado. Las casillas se crean UNA vez y luego solo se
+        recolorean: añadir y quitar subviews en cada repintado es lo que hace
+        parpadear una ventana."""
+        marco = NSView.alloc().initWithFrame_(
+            NSMakeRect(PAD, y_(top + height, height), W - PAD * 2, height))
+        marco.setWantsLayer_(True)
+        marco.layer().setBackgroundColor_(theme.KEYCAP_BG.CGColor())
+        marco.layer().setCornerRadius_(10.0)
+        marco.layer().setBorderWidth_(1.0)
+        marco.layer().setBorderColor_(theme.DIVIDER.CGColor())
+        content.addSubview_(marco)
+
+        ancho = marco.frame().size.width - 16
+        alto_fila = (height - 16) / len(KEYBOARD_ROWS)
+        for i, fila in enumerate(KEYBOARD_ROWS):
+            total = sum(w for _, w in fila)
+            x = 8.0
+            fy = height - 8 - (i + 1) * alto_fila
+            for nombre, w in fila:
+                kw = (ancho * w / total) - 3
+                casilla = NSView.alloc().initWithFrame_(
+                    NSMakeRect(x, fy + 2, max(kw, 4), alto_fila - 4))
+                casilla.setWantsLayer_(True)
+                casilla.layer().setCornerRadius_(4.0)
+                marco.addSubview_(casilla)
+                if nombre:
+                    self._keys[nombre] = casilla
+                else:
+                    _apagar(casilla)
+                x += kw + 3
+
+    def _paint_keyboard(self):
+        """Recolorea las casillas según self._estado. DEBE correr en el hilo
+        principal: lo llama también la captura, que llega por el hilo del
+        listener de pynput."""
+        encendidas = lit_keys(self._estado)
+        for nombre, casilla in self._keys.items():
+            sid = encendidas.get(nombre)
+            if sid == "dictation":
+                casilla.layer().setBackgroundColor_(theme.TEAL.CGColor())
+                casilla.layer().setBorderWidth_(1.0)
+                casilla.layer().setBorderColor_(theme.TEAL_DARK.CGColor())
+            elif sid:
+                casilla.layer().setBackgroundColor_(theme.MODEL_BTN_BG.CGColor())
+                casilla.layer().setBorderWidth_(1.0)
+                casilla.layer().setBorderColor_(theme.MODEL_BTN_BORDER.CGColor())
+            else:
+                _apagar(casilla)
 
     # ---------- ciclo de vida ----------
     def show(self):
