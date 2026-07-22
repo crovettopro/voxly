@@ -1684,9 +1684,16 @@ class VoooxlyApp(rumps.App):
                     self.update_item._menuitem.setHidden_(False)
 
                 self._on_main(_show_update)
-            self._schedule_update_check()
         except Exception:
             pass
+        finally:
+            # El re-chequeo periódico debe armarse tanto si el check de
+            # arranque tuvo éxito como si falló (sin red / appcast caído):
+            # si va al `except` y `_schedule_update_check()` queda dentro del
+            # `try`, el timer 24 h nunca se arrancaría y las versiones que
+            # aparecen con la app abierta pasarían inadvertidas hasta el
+            # siguiente reinicio.
+            self._schedule_update_check()
         # 4) sembrar Recent con el historial persistente de sesiones anteriores
         try:
             if self._save_history_on() and not self._history:
