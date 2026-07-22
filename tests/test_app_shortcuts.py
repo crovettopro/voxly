@@ -2,8 +2,10 @@
 
 Instanciar VoooxlyApp construye menús de AppKit y no corre en un test (mismo
 motivo por el que existen keys.py, shortcuts.py y ai_menu_labels a nivel de
-módulo). Se prueba la función de aplicar un atajo contra un hotkey falso.
+módulo). Se prueba la función de aplicar un atajo contra un hotkey falso, y la
+función que migra + persiste prefs.json en __init__.
 """
+from voooxly import app as app_mod
 from voooxly.app import apply_shortcut
 
 
@@ -113,3 +115,30 @@ def test_aplicar_un_atajo_no_reinicia_el_listener():
         "SIGABRT (HIToolbox: la Text Input Sources API llamada desde dos "
         "hilos a la vez). Cambiar un atajo nunca debe tocar start()."
     )
+
+
+def test_una_migracion_vieja_acaba_persistida(monkeypatch):
+    """Quien actualiza desde v1.3.0 y nunca abre la ventana de Shortcuts
+    tiene que acabar con la clave "shortcuts" en su prefs.json igualmente —
+    si no, el día que una versión futura deje de leer las claves viejas,
+    pierde su configuración sin haber hecho nada malo."""
+    guardado = {}
+    monkeypatch.setattr(app_mod, "_save_prefs", lambda prefs: guardado.update(prefs))
+
+    prefs = {"dictation_key": "alt_r", "dictation_mode": "toggle"}
+    assert app_mod._migrate_shortcuts_prefs(prefs) is True
+    assert guardado.get("shortcuts", {}).get("dictation", {}).get("keys") == ["alt_r"]
+
+
+def test_un_prefs_ya_migrado_no_provoca_escritura(monkeypatch):
+    """Sin este corte, __init__ reescribiría prefs.json en cada arranque sin
+    motivo — shortcuts.migrate() ya no tiene nada que cambiar aquí."""
+    llamadas = []
+    monkeypatch.setattr(app_mod, "_save_prefs", lambda prefs: llamadas.append(prefs))
+
+    prefs = {
+        "dictation_key": "alt_r",
+        "shortcuts": {"dictation": {"keys": ["f13"], "delay_ms": 0, "style": "hold"}},
+    }
+    assert app_mod._migrate_shortcuts_prefs(prefs) is False
+    assert llamadas == []

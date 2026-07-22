@@ -94,6 +94,29 @@ def ai_engine_title(selection, detected: str) -> str:
     return f"AI engine — {label} (auto)"
 
 
+def _migrate_shortcuts_prefs(prefs: dict) -> bool:
+    """Migra `prefs` (en memoria) al bloque `shortcuts` y persiste el
+    resultado en disco — pero SOLO si `shortcuts.migrate()` cambió algo de
+    verdad. Devuelve si escribió.
+
+    A nivel de módulo y no inline en __init__, por el mismo motivo que
+    apply_shortcut: instanciar VoooxlyApp construye menús de AppKit y eso no
+    corre en un test.
+
+    Sin este guardado, un usuario que actualiza desde v1.3.0 y nunca abre la
+    ventana de Shortcuts no llega a tener nunca la clave "shortcuts" en su
+    prefs.json: hoy es inofensivo porque resolve() recalcula lo mismo leyendo
+    las claves viejas en cada arranque, pero el día que una versión futura
+    deje de leerlas, ese usuario pierde su configuración sin haber hecho
+    nada malo. Y escribir SIEMPRE (haya migrado algo o no) reescribiría
+    prefs.json en cada arranque sin motivo.
+    """
+    if not shortcuts.migrate(prefs):
+        return False
+    _save_prefs(prefs)
+    return True
+
+
 def apply_shortcut(hk, sid: str, fila: dict) -> tuple[bool, str]:
     """Aplica un atajo al HotkeyManager. Devuelve (ok, mensaje en inglés).
 
@@ -234,7 +257,7 @@ class VoooxlyApp(rumps.App):
         # Se resuelve ANTES de _build_menu(): el ítem de Shortcuts marca el
         # estado inicial leyendo self._dictation_key/self._toggle_mode, así
         # que tienen que existir antes de construir esos NSMenuItem.
-        shortcuts.migrate(self._prefs)
+        _migrate_shortcuts_prefs(self._prefs)
         self._shortcuts = shortcuts.resolve(self._prefs, cfg)
         dic = self._shortcuts["dictation"]
         tecla, modo = dic["keys"][0], dic["style"]
