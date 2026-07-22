@@ -10,8 +10,10 @@ Modos del botón de dictado:
   la sueltas para terminar.
 - "toggle": pulsas para empezar, pulsas/te callas para terminar.
 
-cycle_mode (Ctrl+Shift+M) y paste_last (Ctrl+Shift+V) se detectan como combos
-dentro del mismo listener.
+cycle_mode (Ctrl+Shift+M) se detecta como combo dentro del mismo listener.
+paste_last ya no tiene atajo de teclado: ⌘V cubre el caso común y el menú
+Recent (app.py) el de repegar una dictada anterior; el método paste_last()
+sigue vivo en app.py, solo sin binding.
 
 cancel (Esc) descarta el dictado en curso: la app decide si aplica (solo cuando
 está grabando o procesando), así que dispararlo en cada Esc del sistema es barato.
@@ -130,12 +132,10 @@ class HotkeyManager:
         toggle_mode: str,
         toggle_keys: list[str],
         cycle_keys: list[str],
-        paste_keys: list[str],
         on_toggle,
         on_start,
         on_stop,
         on_cycle,
-        on_paste,
         cancel_keys: list[str] | None = None,
         on_cancel=None,
         latch_keys: list[str] | None = None,
@@ -148,7 +148,6 @@ class HotkeyManager:
         self.on_start = on_start
         self.on_stop = on_stop
         self.on_cycle = on_cycle
-        self.on_paste = on_paste
         self.on_cancel = on_cancel
         self.on_latch = on_latch
 
@@ -160,9 +159,8 @@ class HotkeyManager:
         self._latch_key = _canon(latch_keys[0]) if latch_keys else None
         self._held = False
         self._latched = False
-        # combos (cycle/paste) y también el toggle si modo "toggle" con combo
+        # combo de cycle y también el toggle si modo "toggle" con combo
         self._cycle_combo = _combo_names(cycle_keys) if cycle_keys else None
-        self._paste_combo = _combo_names(paste_keys) if paste_keys else None
         self._toggle_combo = _combo_names(toggle_keys) if (toggle_mode != "hold" and toggle_keys) else None
 
         self._pressed: set[str] = set()
@@ -215,7 +213,13 @@ class HotkeyManager:
                 self._started = True
         threading.Thread(target=self.on_start if hold else self.on_toggle, daemon=True).start()
 
-    def reconfigure(self, toggle_key: str, toggle_mode: str, guard: bool) -> bool:
+    def reconfigure(
+        self,
+        toggle_key: str,
+        toggle_mode: str,
+        guard: bool,
+        guard_delay: float | None = None,
+    ) -> bool:
         """Cambia la tecla de dictado sin recrear el manager.
 
         Vive aquí y no en app.py porque rehacer _toggle_combo al pasar a modo
@@ -252,6 +256,10 @@ class HotkeyManager:
         self._toggle_key = canon
         self.toggle_mode = toggle_mode
         self._guard = bool(guard)
+        # guard_delay=None conserva el actual: quien solo cambia de estilo no
+        # tiene por qué saber el delay que hay puesto.
+        if guard_delay is not None:
+            self._guard_delay = float(guard_delay)
         self._toggle_combo = (
             None if toggle_mode == "hold" else _combo_names([self._toggle_key])
         )
@@ -259,6 +267,46 @@ class HotkeyManager:
         self._held = False
         self._started = False
         self._latched = False
+        return True
+
+    def rebind(self, sid: str, names: list[str]) -> bool:
+        """Cambia cycle_mode / latch / cancel con el listener ya corriendo.
+
+        Vive aquí y no en app.py por lo mismo que reconfigure(): rehacer un
+        frozenset de combo es un detalle interno de esta clase. El listener NO
+        se rearranca — _on_press relee estos atributos en cada evento, y
+        arrancar un segundo listener aborta el proceso con SIGABRT.
+
+        Devuelve False si el binding colisiona con la tecla de dictado. Esa
+        colisión deja el atajo muerto en silencio: la rama de hold de
+        _on_press retorna antes de llegar a latch o a cancel, así que el
+        usuario vería la tecla asignada en la ventana y no pasaría nada.
+        shortcuts.validate() ya lo filtra antes, pero quien llame directo a
+        rebind() se lo saltaría entero.
+
+        No se levanta excepción: quien llama es código de AppKit y una
+        excepción sin capturar ahí se lleva la app por delante.
+        """
+        canon = [_canon(n) for n in names] if names else []
+        if not canon:
+            return False
+        if self._toggle_key in canon:
+            log.warning(
+                "rebind(%r, %r) rechazado: colisiona con la tecla de dictado (%r).",
+                sid, names, self._toggle_key,
+            )
+            return False
+
+        if sid == "cycle_mode":
+            self._cycle_combo = frozenset(canon)
+        elif sid == "latch":
+            self._latch_key = canon[0]
+        elif sid == "cancel":
+            self._cancel_key = canon[0]
+        else:
+            log.warning("rebind(%r): id desconocido.", sid)
+            return False
+        log.info("Atajo %s reasignado a %s.", sid, canon)
         return True
 
     # --- listener callbacks ---
@@ -331,9 +379,6 @@ class HotkeyManager:
             return
         if self._cycle_combo and snapshot == self._cycle_combo:
             threading.Thread(target=self.on_cycle, daemon=True).start()
-            return
-        if self._paste_combo and snapshot == self._paste_combo:
-            threading.Thread(target=self.on_paste, daemon=True).start()
             return
 
     def _on_release(self, key):

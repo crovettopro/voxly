@@ -12,12 +12,10 @@ def _mk(on_cancel, on_start=None, on_stop=None):
         toggle_mode="hold",
         toggle_keys=["cmd_r"],
         cycle_keys=["ctrl", "shift", "m"],
-        paste_keys=["ctrl", "shift", "v"],
         on_toggle=lambda: None,
         on_start=on_start or (lambda: None),
         on_stop=on_stop or (lambda: None),
         on_cycle=lambda: None,
-        on_paste=lambda: None,
         cancel_keys=["esc"],
         on_cancel=on_cancel,
     )
@@ -76,11 +74,9 @@ def test_no_cancel_key_configured():
         toggle_mode="hold",
         toggle_keys=["cmd_r"],
         cycle_keys=["ctrl", "shift", "m"],
-        paste_keys=["ctrl", "shift", "v"],
         on_toggle=lambda: None,
         on_start=lambda: None,
         on_stop=lambda: None,
         on_cycle=lambda: None,
-        on_paste=lambda: None,
     )
     hk._on_press(keyboard.Key.esc)  # no debe lanzar
