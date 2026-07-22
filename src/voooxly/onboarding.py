@@ -73,6 +73,19 @@ from AppKit import (
 from Foundation import NSAttributedString, NSMakeRect, NSMakeSize, NSObject, NSTimer
 
 from . import setup_checks, stt
+from .theme import (  # noqa: F401  (se re-exportan: los usan las páginas)
+    BTN_BORDER, BTN_GHOST_TEXT, CTA_DISABLED_BG, CTA_DISABLED_TEXT, DIVIDER,
+    HAIRLINE, INK, INK_KEYCAP, INK_MUTED, INK_SOFT, KEYCAP_BG, KEYCAP_BG2,
+    KEYCAP_EDGE, MODEL_BTN_BG, MODEL_BTN_BORDER, PAGE_BG, PENDING_RING,
+    PROGRESS_TRACK, TEAL, TEAL_DARK,
+)
+from .theme import hex_ as _hex
+from .theme import keycap as _keycap
+from .theme import label as _label
+from .theme import mono as _mono
+from .theme import rule as _rule
+from .theme import serif as _serif
+from .theme import sf as _sf
 
 log = logging.getLogger("voooxly.onboarding")
 
@@ -84,34 +97,6 @@ def _y(top, h):
     """Convierte una 'y desde arriba' (como en el diseño) al origen abajo-izquierda."""
     return H - top - h
 
-
-def _hex(s, a=1.0):
-    s = s.lstrip("#")
-    return NSColor.colorWithSRGBRed_green_blue_alpha_(
-        int(s[0:2], 16) / 255.0, int(s[2:4], 16) / 255.0, int(s[4:6], 16) / 255.0, a)
-
-
-# ---- paleta de marca: teal + papel (voooxly.com / make-icon.py) ----
-TEAL = _hex("#107A69")
-TEAL_DARK = _hex("#085448")
-INK = _hex("#1B241F")
-INK_SOFT = _hex("#5F6B65")
-INK_MUTED = _hex("#93A099")
-INK_KEYCAP = _hex("#3F4A46")
-PAGE_BG = _hex("#FCFDFC")
-HAIRLINE = _hex("#EEF2F0")
-DIVIDER = _hex("#E9EEEB")
-BTN_BORDER = _hex("#DDE4E1")
-BTN_GHOST_TEXT = _hex("#7C8A84")
-MODEL_BTN_BG = _hex("#EDF5F3")
-MODEL_BTN_BORDER = _hex("#BFDBD3")
-PROGRESS_TRACK = _hex("#E4EEEB")
-PENDING_RING = _hex("#CBD6D1")
-CTA_DISABLED_BG = _hex("#EDF1EF")
-CTA_DISABLED_TEXT = _hex("#AAB5B0")
-KEYCAP_BG = _hex("#FFFFFF")
-KEYCAP_BG2 = _hex("#EEF4F1")
-KEYCAP_EDGE = _hex("#DEE9E4")
 
 # key, título, explicación, texto del botón, estilo. El orden es el de check_all().
 STEPS = [
@@ -126,34 +111,6 @@ STEPS = [
      "ChatGPT or Gemini and it cleans up, formats and rewrites what you say. "
      "You can also add it later from the menu bar.", "Connect AI", "text"),
 ]
-
-
-# ---------------- fuentes ----------------
-def _sf(size, weight=0.0):
-    return NSFont.systemFontOfSize_weight_(float(size), float(weight))
-
-
-def _mono(size, weight=0.0):
-    try:
-        return NSFont.monospacedSystemFontOfSize_weight_(float(size), float(weight))
-    except Exception:
-        return NSFont.systemFontOfSize_(float(size))
-
-
-def _serif(size, semibold=False):
-    for name in (("Iowan Old Style Bold",) if semibold else ()) + ("Iowan Old Style",):
-        f = NSFont.fontWithName_size_(name, float(size))
-        if f is not None:
-            return f
-    try:  # diseño serif del sistema (New York) como respaldo
-        d = NSFont.systemFontOfSize_(float(size)).fontDescriptor()
-        d = d.fontDescriptorWithDesign_("NSCTFontUIFontDesignSerif")
-        f = NSFont.fontWithDescriptor_size_(d, float(size))
-        if f is not None:
-            return f
-    except Exception:
-        pass
-    return NSFont.boldSystemFontOfSize_(float(size)) if semibold else NSFont.systemFontOfSize_(float(size))
 
 
 class OnboardingController(NSObject):
@@ -599,66 +556,6 @@ class OnboardingController(NSObject):
 
 
 # ---------------- helpers de vistas ----------------
-def _label(rect, text, font, color=None, align=NSTextAlignmentLeft, multiline=False):
-    f = NSTextField.alloc().initWithFrame_(rect)
-    f.setStringValue_(text)
-    f.setBezeled_(False)
-    f.setDrawsBackground_(False)
-    f.setEditable_(False)
-    f.setSelectable_(False)
-    f.setFont_(font)
-    if color is not None:
-        f.setTextColor_(color)
-    if align != NSTextAlignmentLeft:
-        f.setAlignment_(align)
-    if multiline:
-        _make_multiline(f)
-    return f
-
-
-def _rule(rect, color):
-    """Línea hairline (divisor / separador de filas)."""
-    v = NSView.alloc().initWithFrame_(rect)
-    v.setWantsLayer_(True)
-    v.layer().setBackgroundColor_(color.CGColor())
-    return v
-
-
-def _keycap(rect, text, glyph_font, radius, gradient=False):
-    """Tecla estilizada: papel/blanco redondeado con borde y borde-inferior en
-    relieve (profundidad). El glifo centrado."""
-    w, h = rect.size.width, rect.size.height
-    v = NSView.alloc().initWithFrame_(rect)
-    v.setWantsLayer_(True)
-    layer = v.layer()
-    layer.setCornerRadius_(float(radius))
-    layer.setBorderWidth_(1.0)
-    layer.setBorderColor_(KEYCAP_EDGE.CGColor())
-    if gradient:
-        try:
-            from Quartz import CAGradientLayer
-            g = CAGradientLayer.layer()
-            g.setFrame_(NSMakeRect(0, 0, w, h))
-            g.setCornerRadius_(float(radius))
-            g.setColors_([KEYCAP_BG.CGColor(), KEYCAP_BG2.CGColor()])
-            layer.addSublayer_(g)
-        except Exception:
-            layer.setBackgroundColor_(KEYCAP_BG.CGColor())
-    else:
-        layer.setBackgroundColor_(KEYCAP_BG.CGColor())
-    try:
-        layer.setShadowOpacity_(0.22 if gradient else 0.10)
-        layer.setShadowRadius_(12.0 if gradient else 3.0)
-        layer.setShadowOffset_(NSMakeSize(0, -3 if gradient else -1))
-        layer.setShadowColor_(TEAL_DARK.CGColor())
-    except Exception:
-        pass
-    lbl = _label(NSMakeRect(0, (h - (glyph_font.pointSize() + 8)) / 2, w, glyph_font.pointSize() + 8),
-                 text, glyph_font, TEAL_DARK if gradient else INK_KEYCAP, align=NSTextAlignmentCenter)
-    v.addSubview_(lbl)
-    return v
-
-
 def _row_button(rect, title, style, target, action):
     """Botón de fila: 'ghost' (borde fino), 'tint' (relleno teal claro) o
     'text' (solo texto teal)."""
@@ -711,16 +608,6 @@ def _style_cta(b, enabled, title):
     b.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(
         title, {NSFontAttributeName: _sf(14, 0.3), NSForegroundColorAttributeName: fg}))
     b.setEnabled_(enabled)
-
-
-def _make_multiline(field):
-    """Deja que un NSTextField ocupe varias líneas (para descripciones largas)."""
-    try:
-        field.setUsesSingleLineMode_(False)
-        field.cell().setWraps_(True)
-        field.cell().setLineBreakMode_(0)  # NSLineBreakByWordWrapping
-    except Exception:
-        pass
 
 
 # Referencia global: sin ella el recolector se lleva la ventana y desaparece sola.
