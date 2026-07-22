@@ -1134,11 +1134,6 @@ class VoooxlyApp(rumps.App):
             pass
 
     # ---------- acciones de menú ----------
-    def paste_last(self):
-        if self._last_result:
-            output.copy_to_clipboard(self._last_result)
-            output.paste_frontmost()
-
     def _update_ai_item(self, force: bool = True) -> str:
         """Marca el proveedor activo en el submenú. Devuelve su clave.
 

@@ -11,9 +11,8 @@ Modos del botón de dictado:
 - "toggle": pulsas para empezar, pulsas/te callas para terminar.
 
 cycle_mode (Ctrl+Shift+M) se detecta como combo dentro del mismo listener.
-paste_last ya no tiene atajo de teclado: ⌘V cubre el caso común y el menú
-Recent (app.py) el de repegar una dictada anterior; el método paste_last()
-sigue vivo en app.py, solo sin binding.
+paste_last no tiene atajo de teclado ni método propio: ⌘V cubre el caso
+común y el menú Recent (app.py) el de repegar una dictada anterior.
 
 cancel (Esc) descarta el dictado en curso: la app decide si aplica (solo cuando
 está grabando o procesando), así que dispararlo en cada Esc del sistema es barato.
