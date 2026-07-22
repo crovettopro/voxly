@@ -275,9 +275,13 @@ class VoooxlyApp(rumps.App):
         self.quit = rumps.MenuItem("Quit Voooxly", callback=self._quit)
         # Oculto hasta que el comprobador encuentre una versión nueva (ver _warmup).
         self.update_item = rumps.MenuItem("Update available", callback=self._open_update)
+        self.about_item = rumps.MenuItem("About Voooxly", callback=self._show_about)
         self._update_url = ""
         self._update_version = ""
         self._update_downloading = False
+        # Re-chequeo periódico cada updates.CHECK_INTERVAL; HUD una vez por versión.
+        self._update_timer: threading.Timer | None = None
+        self._notified_update_version: str | None = None
         self._paused_players: list[str] = []
         self._mode_flash_seq = 0
         self._mic_warned = False
@@ -340,6 +344,7 @@ class VoooxlyApp(rumps.App):
             self.stats_item,
             settings,
             rumps.separator,
+            self.about_item,
             self.update_item,
             self.quit,
         ]
@@ -1413,6 +1418,87 @@ class VoooxlyApp(rumps.App):
         else:
             subprocess.run(["open", self._update_url], check=False)
 
+    def _show_about(self, _sender):
+        """Diálogo About: icono, versión y un botón para comprobar updates."""
+        from AppKit import (
+            NSAlert,
+            NSAlertFirstButtonReturn,
+            NSAlertStyleInformational,
+            NSApp,
+        )
+
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Voooxly")
+        alert.setInformativeText_(
+            f"Version {updates.current_version()}\n\nLocal dictation on your Mac."
+        )
+        alert.setIcon_(NSApp.applicationIconImage())
+        alert.setAlertStyle_(NSAlertStyleInformational)
+        alert.addButtonWithTitle_("Check for updates…")
+        alert.addButtonWithTitle_("OK")
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            self._check_now(None)
+
+    def _check_now(self, _sender):
+        """Check manual (vía el botón de About). Offload a hilo; alert con el resultado."""
+        def _work():
+            status, info = updates.check_status()
+            def _on_done():
+                if status == updates.UPDATE_AVAILABLE and info:
+                    self._update_url = info["url"]
+                    self._update_version = info["version"]
+                    ver = info["version"]
+
+                    def _show():
+                        self.update_item.title = f"Update to {ver} →"
+                        self.update_item._menuitem.setHidden_(False)
+
+                    self._on_main(_show)
+                title, message = check_now_message(
+                    status, info, updates.current_version()
+                )
+                self._alert(title, message)
+
+            self._on_main(_on_done)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _schedule_update_check(self):
+        """Re-chequeo cada updates.CHECK_INTERVAL. Se reagenda a sí mismo; cancelable."""
+        self._update_timer = threading.Timer(
+            updates.CHECK_INTERVAL, self._periodic_update_check
+        )
+        self._update_timer.daemon = True
+        self._update_timer.start()
+
+    def _periodic_update_check(self):
+        # Silencioso salvo la primera vez que aparece una versión nueva: HUD
+        # efímero (una vez por versión) + el ítem de menú. Fallos de red: log.
+        try:
+            info = updates.check()
+            if info:
+                self._update_url = info["url"]
+                self._update_version = info["version"]
+                ver = info["version"]
+
+                def _show():
+                    self.update_item.title = f"Update to {ver} →"
+                    self.update_item._menuitem.setHidden_(False)
+
+                self._on_main(_show)
+                if updates.should_notify(info, self._notified_update_version):
+                    self._notified_update_version = ver
+                    self._on_main(
+                        lambda: self._hud(
+                            "See the menu to install.",
+                            title=f"Voooxly {ver} is available",
+                        )
+                    )
+        except Exception:
+            log.debug("re-chequeo periódico falló (ignorado)", exc_info=True)
+        finally:
+            self._schedule_update_check()
+
     def _show_stats(self, _sender):
         self._alert("Your dictation stats", stats.summary())
 
@@ -1423,6 +1509,8 @@ class VoooxlyApp(rumps.App):
                 self._recorder.stop()
             if self._hotkey:
                 self._hotkey.stop()
+            if self._update_timer:
+                self._update_timer.cancel()
             stt.stop_server()
         finally:
             rumps.quit_application()
@@ -1584,8 +1672,11 @@ class VoooxlyApp(rumps.App):
             if info:
                 self._update_url = info["url"]
                 self._update_version = info["version"]
-                # corre en el hilo de _warmup: title + setHidden_ del NSMenuItem
-                # van por el main (mismo crash SIGTRAP si el menú está abierto).
+                # Si ya hay novedad al arranque, la contamos como "avisada" para
+                # que el re-chequeo periódico no suelte el HUD 24 h después por la
+                # misma versión: el HUD es para versiones que aparecen NUEVAS
+                # mientras la app está abierta.
+                self._notified_update_version = info["version"]
                 ver = info["version"]
 
                 def _show_update():
@@ -1593,6 +1684,7 @@ class VoooxlyApp(rumps.App):
                     self.update_item._menuitem.setHidden_(False)
 
                 self._on_main(_show_update)
+            self._schedule_update_check()
         except Exception:
             pass
         # 4) sembrar Recent con el historial persistente de sesiones anteriores
