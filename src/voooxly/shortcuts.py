@@ -73,9 +73,10 @@ def _teclas_validas(valor) -> list[str] | None:
         if not n:
             return None
         fuera.append(n)
-    # Un combo se valida tecla a tecla salvo sus modificadores sin lado, que
-    # en un combo SÍ son legítimos ("ctrl" en ctrl+shift+m casa con las dos
-    # manos) aunque validate_custom los rechace como tecla de dictado suelta.
+    # Los combos de múltiples teclas (como ctrl+shift+m) se devuelven sin
+    # validar: un modificador sin lado como 'ctrl' es ilegal como tecla de
+    # dictado suelta (validate_custom lo rechaza) pero perfectamente legítimo
+    # en un combo. Solo las teclas individuales necesitan validación.
     if len(fuera) == 1:
         return fuera if keys.validate_custom(fuera[0])[0] else None
     return fuera
@@ -123,7 +124,7 @@ def resolve(prefs: dict, cfg) -> dict[str, dict]:
             estilo = bloque.get("style")
             if not isinstance(estilo, str) or estilo not in keys.MODES:
                 estilo = cfg.get("hotkeys.toggle_mode", DEFAULT_STYLE)
-            if estilo not in keys.MODES:
+            if not isinstance(estilo, str) or estilo not in keys.MODES:
                 estilo = DEFAULT_STYLE
             fila["style"] = estilo
         fuera[sid] = fila

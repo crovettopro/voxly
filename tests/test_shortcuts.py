@@ -81,3 +81,21 @@ def test_un_delay_no_numerico_cae_al_valor_seguro():
 def test_un_estilo_desconocido_cae_a_hold():
     r = shortcuts.resolve({"shortcuts": {"dictation": {"keys": ["cmd_r"], "style": "bailar"}}}, _Cfg())
     assert r["dictation"]["style"] == "hold"
+
+
+def test_un_tipo_erroneo_en_hotkeys_toggle_mode_no_rompe_todos_los_atajos():
+    # Un error de tecleo en config.yaml como `toggle_mode: [hold]` en lugar de
+    # `toggle_mode: hold` puede pasar: es un archivo editado a mano. Ese typo
+    # no debe dejar la app sin atajos: la segunda guarda de tipo debe ser tan
+    # fuerte como la primera.
+    cfg = _Cfg({"hotkeys.toggle_mode": ["hold"]})  # Una lista en lugar de str
+    r = shortcuts.resolve({"shortcuts": {}}, cfg)
+    # El estilo debe caer al default sin lanzar TypeError
+    assert r["dictation"]["style"] == "hold"
+    # Crítico: todos los cuatro atajos deben resolverse, no solo "dictation"
+    assert "cycle_mode" in r
+    assert "latch" in r
+    assert "cancel" in r
+    assert r["cycle_mode"]["keys"] == ["ctrl", "shift", "m"]
+    assert r["latch"]["keys"] == ["shift"]
+    assert r["cancel"]["keys"] == ["esc"]
