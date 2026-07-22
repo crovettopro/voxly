@@ -328,6 +328,16 @@ class HotkeyManager:
         es justo lo que hace que la tecla elegida case luego de verdad.
         """
         self._cancel_guard()
+        # Si hay una grabación real en curso (_started) o fijada con latch
+        # (_latched), entrar en modo captura la deja huérfana: _on_press va a
+        # tragarse cada evento que llegue -incluido Esc- mientras se captura,
+        # así que ni on_cancel ni el próximo on_stop del flujo normal van a
+        # volver a verla nunca. Hay que cerrarla aquí, con on_stop() (no
+        # on_cancel()) porque el usuario ya dijo algo: transcribirlo y que
+        # quede en el historial es recuperable si el paste cae en la ventana
+        # de Shortcuts; tirar el audio grabado no lo es.
+        if self._started or self._latched:
+            threading.Thread(target=self.on_stop, daemon=True).start()
         self._held = False
         self._started = False
         self._latched = False

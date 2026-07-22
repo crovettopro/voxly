@@ -139,3 +139,51 @@ def test_soltar_teclas_durante_la_captura_no_dispara_nada():
     hk._on_release(keyboard.Key.cmd_r)
     time.sleep(DELAY * 3)
     assert not stopped.is_set()
+
+
+def test_begin_capture_para_una_grabacion_en_curso():
+    # begin_capture() arma la captura de la ventana de Shortcuts limpiando
+    # _started a False sin más. Si hay una grabación real corriendo (on_start
+    # ya se llamó), _on_press/_on_release van a estar tragándose todos los
+    # eventos mientras se captura, así que ni Esc ni la propia tecla de
+    # dictado van a poder cerrarla nunca: el micro se queda abierto para
+    # siempre. begin_capture() tiene que soltarla con on_stop() antes de
+    # barrer las banderas, igual que soltar la tecla en circunstancias
+    # normales.
+    started = threading.Event()
+    stopped = threading.Event()
+    hk = _mk(on_start=started.set, on_stop=stopped.set, toggle_guard=False)
+    hk._on_press(keyboard.Key.cmd_r)
+    assert started.wait(1.0), "el dictado no arrancó de verdad"
+    hk.begin_capture(lambda names: None)
+    assert stopped.wait(1.0), "begin_capture() dejó la grabación huérfana"
+
+
+def test_begin_capture_para_una_grabacion_fijada_en_latch():
+    # El latch existe justo para esto: soltar la tecla de dictado y hacer
+    # otra cosa -como abrir la ventana de Shortcuts- mientras se sigue
+    # grabando. Si begin_capture() se limita a poner _latched en False, esa
+    # grabación fijada queda huérfana exactamente igual que la del test de
+    # arriba, solo que además nadie la ve "corriendo" porque la tecla ya
+    # estaba soltada.
+    started = threading.Event()
+    latched = threading.Event()
+    stopped = threading.Event()
+    hk = _mk(on_start=started.set, on_latch=latched.set, on_stop=stopped.set, toggle_guard=False)
+    hk._on_press(keyboard.Key.cmd_r)
+    assert started.wait(1.0), "el dictado no arrancó de verdad"
+    hk._on_press(keyboard.Key.shift)
+    assert latched.wait(1.0), "el latch no se fijó"
+    hk.begin_capture(lambda names: None)
+    assert stopped.wait(1.0), "begin_capture() dejó la grabación fijada huérfana"
+
+
+def test_begin_capture_sin_grabacion_no_dispara_stop():
+    # Caso negativo: sin ningún dictado en curso, begin_capture() no debe
+    # llamar a on_stop(). Sin este test, un arreglo perezoso que disparase
+    # on_stop() a ciegas en cada begin_capture() pasaría igual los dos de
+    # arriba y estaría parando dictados que nunca empezaron.
+    stopped = threading.Event()
+    hk = _mk(on_stop=stopped.set)
+    hk.begin_capture(lambda names: None)
+    assert not stopped.wait(DELAY * 3), "begin_capture() disparó on_stop() sin grabación en curso"
