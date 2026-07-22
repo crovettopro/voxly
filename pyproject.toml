@@ -26,6 +26,14 @@ voooxly = "voooxly.__main__:main"
 [dependency-groups]
 dev = ["pytest>=8.0", "pyinstaller>=6.0", "dmgbuild>=1.6"]
 
+[tool.pytest.ini_options]
+# El layout es src/, así que la suite necesita src en sys.path. Declararlo aquí
+# en vez de depender del editable install: en macOS basta con que el .pth del
+# venv tenga el flag UF_HIDDEN para que site.addpackage() lo ignore en silencio
+# —sin excepción ni aviso— y entonces ni siquiera se pueden importar los tests.
+pythonpath = ["src"]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
