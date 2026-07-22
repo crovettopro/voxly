@@ -9,7 +9,7 @@ NSPanel devuelve isVisible=True y no pinta un solo píxel; por eso la ventana
 es un NSWindow y por eso la verificación de que compone es manual, con
 screencapture (ver el plan, Task 8 paso 6).
 """
-from voooxly import settings_window, shortcuts
+from voooxly import settings_window, shortcuts, theme
 
 ESTADO = {
     "dictation": {"keys": ["cmd_r"], "style": "hold", "delay_ms": 0},
@@ -112,6 +112,61 @@ def test_los_keycaps_quedan_alineados_en_las_cuatro_filas():
         ESTADO, lambda sid, fila: (True, ""))
     xs = {sid: cap.frame().origin.x for sid, cap in c._keycaps.items()}
     assert len(set(xs.values())) == 1, xs
+    c.close()
+
+
+# Task 10, Defecto 2 (fix2): con cycle_mode en cinco teclas el keycap
+# dibujaba ⌃⌥⇧⌘ y se tragaba la Q entera -_KEYCAP_W (62pt) se quedaba corto
+# para el glifo real, medido con theme.text_width en 63,7pt, y la etiqueta
+# interna de theme.keycap() iba centrada, así que un campo justo de ancho
+# recortaba el último carácter sin que stringValue() se enterase.
+_ESTADO_COMBO_LARGO = {**ESTADO, "cycle_mode": {"keys": ["ctrl", "alt", "shift", "cmd", "q"]}}
+
+
+def test_el_keycap_de_un_combo_largo_mide_al_menos_su_texto():
+    """El defecto real, reproducido: con cinco teclas a la vez el glifo mide
+    más que los 62pt de siempre. Esto no puede probar que no se vea recortado
+    en pantalla (para eso hace falta un screenshot manual, ver
+    verificar-ventana.py), pero sí que el ancho reservado ya no se queda
+    corto para lo que de verdad hay que pintar -sin clavar un ancho en
+    píxeles, comparado contra theme.text_width() como el resto de anchos
+    medidos de este módulo."""
+    c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
+        _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
+    texto = settings_window.key_label(_ESTADO_COMBO_LARGO["cycle_mode"]["keys"])
+    necesita = theme.text_width(texto, theme.sf(14, 0.3))
+    cap = c._keycaps["cycle_mode"]
+    assert cap.frame().size.width >= necesita, (cap.frame().size.width, necesita)
+    c.close()
+
+
+def test_un_keycap_corto_conserva_el_ancho_minimo_aunque_otra_fila_sea_larga():
+    """_KEYCAP_W (62pt) pasa a ser un SUELO, no un techo: los combos cortos
+    de siempre (⌘ de dictation, esc de cancel) no cambian de tamaño -ni
+    siquiera cuando OTRA fila (cycle_mode, aquí con cinco teclas) sí necesita
+    más sitio-, o las filas bailarían cada vez que alguien reasigna un
+    atajo distinto al suyo."""
+    c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
+        _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
+    for sid in ("dictation", "latch", "cancel"):
+        assert c._keycaps[sid].frame().size.width == settings_window._KEYCAP_W, sid
+    assert c._keycaps["cycle_mode"].frame().size.width > settings_window._KEYCAP_W
+    c.close()
+
+
+def test_el_keycap_largo_no_se_solapa_con_la_etiqueta_de_lado():
+    """Al ensanchar el keycap para no recortar un combo largo, la fila tiene
+    que seguir cuadrando: el borde derecho del keycap no puede pisar la
+    etiqueta de lado. Se compara un marco contra el otro -no contra una
+    constante de layout- para que la comprobación no dependa de que
+    _LADO_GAP siga valiendo lo mismo mañana."""
+    c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
+        _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
+    for sid in shortcuts.SHORTCUTS:
+        cap = c._keycaps[sid]
+        lado = c._sides[sid]
+        assert cap.frame().origin.x + cap.frame().size.width <= lado.frame().origin.x, (
+            sid, cap.frame(), lado.frame())
     c.close()
 
 

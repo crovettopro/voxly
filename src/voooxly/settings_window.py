@@ -96,6 +96,31 @@ _LADO_GAP = 4       # hueco entre el keycap y la etiqueta de lado
 _LADO_MARGEN_D = 4  # hueco entre la etiqueta de lado y el borde de la fila
 _KEYCAP_W = 62
 _KEYCAP_H = 26
+_KEYCAP_HOLGURA = 6   # misma holgura que ya usan _LADO_HOLGURA y _NOTA_HUERFANA_HOLGURA
+
+
+def _keycap_ancho(text: str, font) -> float:
+    """Ancho que necesita el keycap para no recortar `text` con `font`,
+    medido de verdad con AppKit (theme.text_width) -Task 10, Defecto 2
+    (fix2): con cycle_mode en cinco teclas (⌃⌥⇧⌘Q) el glifo mide más que los
+    62pt de _KEYCAP_W, y la etiqueta interna de theme.keycap() iba centrada,
+    así que un NSTextField centrado y justo de ancho recortaba la Q sin que
+    stringValue() se enterase -la misma familia de bug que _lado_ancho() y
+    _nota_huerfana_ancho() ya corrigen más arriba en este módulo.
+
+    _KEYCAP_W pasa a ser un SUELO, no un techo: para los combos cortos de
+    siempre (⌘, esc) el máximo de las dos cantidades sigue siendo _KEYCAP_W y
+    el keycap no cambia de tamaño -las filas no bailan-, pero un combo que
+    mida de verdad más que eso ensancha SOLO su propia fila. A diferencia de
+    _lado_ancho() (un valor compartido por las cuatro filas porque side_hint
+    solo puede devolver uno de cuatro textos ya conocidos, sea cual sea la
+    fila), aquí no hay un enum cerrado de combos posibles que medir de
+    antemano para las cuatro a la vez: cada fila mide SU PROPIO contenido, y
+    _build_row() reserva la columna del lado antes que la del keycap
+    (lado_x, calculada con lado_w) precisamente para que un keycap más ancho
+    en una fila no le quite sitio a la etiqueta de lado de esa misma fila."""
+    return max(_KEYCAP_W, math.ceil(theme.text_width(text, font)) + _KEYCAP_HOLGURA)
+
 
 # Leyenda del keycap mientras se captura. NO es "Press keys…": a 14pt (el
 # font del keycap) esa frase mide 84pt de ancho de verdad (theme.text_width)
@@ -530,10 +555,13 @@ class ShortcutsController(NSObject):
         # columna de keycaps queda alineada pase lo que pase el texto de
         # cada fila.
         lado_x = rw - _LADO_MARGEN_D - lado_w
-        cap_x = lado_x - _LADO_GAP - _KEYCAP_W
+        keycap_font = theme.sf(14, 0.3)
+        texto_keycap = key_label(nombres)
+        keycap_w = _keycap_ancho(texto_keycap, keycap_font)
+        cap_x = lado_x - _LADO_GAP - keycap_w
 
-        cap = theme.keycap(NSMakeRect(cap_x, 12 + dy, _KEYCAP_W, _KEYCAP_H),
-                           key_label(nombres), theme.sf(14, 0.3), 7)
+        cap = theme.keycap(NSMakeRect(cap_x, 12 + dy, keycap_w, _KEYCAP_H),
+                           texto_keycap, keycap_font, 7)
         row.addSubview_(cap)
         self._keycaps[sid] = cap
         # theme.keycap() devuelve el CONTENEDOR (el propio keycap dibujado,
