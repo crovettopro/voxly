@@ -102,71 +102,62 @@ def test_la_etiqueta_de_lado_no_corta_either_side():
     c.close()
 
 
-def test_los_keycaps_quedan_alineados_en_las_cuatro_filas():
-    """El ancho de la etiqueta de lado depende del font, no del texto de
-    cada fila en concreto — hace falta el mismo hueco para "either side" en
-    la fila de latch que en la de dictation, aunque esta última solo vaya a
-    mostrar "right". Si cada fila calculase su propio ancho, la columna de
-    keycaps quedaría escalonada; las cuatro comparten un x."""
+def test_los_campos_de_chips_quedan_alineados_en_las_cuatro_filas():
+    """field_width() es ÚNICO para las cuatro filas (la misma decisión que
+    lado_w): cuatro campos de anchos distintos se leerían escalonados. Con
+    ancho y borde derecho compartidos, comparten también el x."""
     c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
         ESTADO, lambda sid, fila: (True, ""))
-    xs = {sid: cap.frame().origin.x for sid, cap in c._keycaps.items()}
+    xs = {sid: campo.frame().origin.x for sid, campo in c._fields.items()}
     assert len(set(xs.values())) == 1, xs
     c.close()
 
 
-# Task 10, Defecto 2 (fix2): con cycle_mode en cinco teclas el keycap
-# dibujaba ⌃⌥⇧⌘ y se tragaba la Q entera -_KEYCAP_W (62pt) se quedaba corto
-# para el glifo real, medido con theme.text_width en 63,7pt, y la etiqueta
-# interna de theme.keycap() iba centrada, así que un campo justo de ancho
-# recortaba el último carácter sin que stringValue() se enterase.
+# La herencia del Defecto 2 de la Task 10: con cycle_mode en cinco teclas el
+# keycap único recortaba la Q. Con chips el riesgo equivalente es que el
+# campo se quede corto y el último chip (o el lápiz) se salga.
 _ESTADO_COMBO_LARGO = {**ESTADO, "cycle_mode": {"keys": ["ctrl", "alt", "shift", "cmd", "q"]}}
 
 
-def test_el_keycap_de_un_combo_largo_mide_al_menos_su_texto():
-    """El defecto real, reproducido: con cinco teclas a la vez el glifo mide
-    más que los 62pt de siempre. Esto no puede probar que no se vea recortado
-    en pantalla (para eso hace falta un screenshot manual, ver
-    verificar-ventana.py), pero sí que el ancho reservado ya no se queda
-    corto para lo que de verdad hay que pintar -sin clavar un ancho en
-    píxeles, comparado contra theme.text_width() como el resto de anchos
-    medidos de este módulo."""
+def test_los_chips_de_un_combo_largo_caben_en_el_campo():
+    """Cinco chips + el lápiz tienen que caber DENTRO del campo: se compara
+    el borde derecho del último chip contra el arranque del lápiz, y el del
+    lápiz contra el ancho del campo — marcos reales, no constantes."""
     c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
         _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
-    texto = settings_window.key_label(_ESTADO_COMBO_LARGO["cycle_mode"]["keys"])
-    necesita = theme.text_width(texto, theme.sf(14, 0.3))
-    cap = c._keycaps["cycle_mode"]
-    assert cap.frame().size.width >= necesita, (cap.frame().size.width, necesita)
+    campo = c._fields["cycle_mode"]
+    chips = c._chips["cycle_mode"]
+    assert len(chips) == 5
+    ultimo = chips[-1].frame()
+    lapiz = c._pencils["cycle_mode"].frame()
+    assert ultimo.origin.x + ultimo.size.width <= lapiz.origin.x, (ultimo, lapiz)
+    assert lapiz.origin.x + lapiz.size.width <= campo.frame().size.width
     c.close()
 
 
-def test_un_keycap_corto_conserva_el_ancho_minimo_aunque_otra_fila_sea_larga():
-    """_KEYCAP_W (62pt) pasa a ser un SUELO, no un techo: los combos cortos
-    de siempre (⌘ de dictation, esc de cancel) no cambian de tamaño -ni
-    siquiera cuando OTRA fila (cycle_mode, aquí con cinco teclas) sí necesita
-    más sitio-, o las filas bailarían cada vez que alguien reasigna un
-    atajo distinto al suyo."""
+def test_todos_los_campos_comparten_ancho_y_respetan_el_minimo():
+    """El ancho compartido nunca baja de _FIELD_MIN_W (un campo de un solo
+    chip seguiría pareciendo un campo, no una astilla) y sube parejo para
+    las cuatro filas cuando un combo largo lo pide."""
     c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
         _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
-    for sid in ("dictation", "latch", "cancel"):
-        assert c._keycaps[sid].frame().size.width == settings_window._KEYCAP_W, sid
-    assert c._keycaps["cycle_mode"].frame().size.width > settings_window._KEYCAP_W
+    anchos = {campo.frame().size.width for campo in c._fields.values()}
+    assert len(anchos) == 1
+    assert anchos.pop() >= settings_window._FIELD_MIN_W
     c.close()
 
 
-def test_el_keycap_largo_no_se_solapa_con_la_etiqueta_de_lado():
-    """Al ensanchar el keycap para no recortar un combo largo, la fila tiene
-    que seguir cuadrando: el borde derecho del keycap no puede pisar la
-    etiqueta de lado. Se compara un marco contra el otro -no contra una
-    constante de layout- para que la comprobación no dependa de que
-    _LADO_GAP siga valiendo lo mismo mañana."""
+def test_el_campo_no_se_solapa_con_la_etiqueta_de_lado():
+    """La etiqueta de lado vive a la IZQUIERDA del campo: su borde derecho
+    no puede pisar el arranque del campo. Marcos reales contra marcos
+    reales, no contra constantes de layout."""
     c = settings_window.ShortcutsController.alloc().initWithState_onChange_(
         _ESTADO_COMBO_LARGO, lambda sid, fila: (True, ""))
     for sid in shortcuts.SHORTCUTS:
-        cap = c._keycaps[sid]
+        campo = c._fields[sid]
         lado = c._sides[sid]
-        assert cap.frame().origin.x + cap.frame().size.width <= lado.frame().origin.x, (
-            sid, cap.frame(), lado.frame())
+        assert lado.frame().origin.x + lado.frame().size.width <= campo.frame().origin.x, (
+            sid, lado.frame(), campo.frame())
     c.close()
 
 

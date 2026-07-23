@@ -30,7 +30,7 @@ from AppKit import (
 )
 from Foundation import NSMakeRect, NSObject
 
-from . import shortcuts, theme
+from . import keys, shortcuts, theme
 
 log = logging.getLogger("voooxly.settings_window")
 
@@ -92,53 +92,66 @@ def key_label(names: list[str]) -> str:
 _LADOS_POSIBLES = ("right", "left", "either side", "")
 _LADO_HOLGURA = 6   # aire entre el texto medido y el borde del campo
 _LADO_ALTO = 15
-_LADO_GAP = 4       # hueco entre el keycap y la etiqueta de lado
-_LADO_MARGEN_D = 4  # hueco entre la etiqueta de lado y el borde de la fila
-_KEYCAP_W = 62
-_KEYCAP_H = 26
-_KEYCAP_HOLGURA = 6   # misma holgura que ya usan _LADO_HOLGURA y _NOTA_HUERFANA_HOLGURA
+_LADO_GAP = 4       # hueco entre el campo de chips y la etiqueta de lado
+_LADO_MARGEN_D = 4  # hueco entre el campo y el borde de la fila
 
-# Afordancia visible "✎ Change" al final de cada fila: la fila entera es un
-# botón invisible (click en cualquier sitio arma la captura), pero sin una
-# pista visible el usuario no sabe DÓNDE clica para reasignar (punto 4 del
-# feedback). Va a la derecha de la etiqueta de lado, que es el sitio que
-# queda libre a ese lado del keycap.
-_CHANGE_TXT = "✎ Change"
-_CHANGE_W = 66
-_CHANGE_H = 20
+# Campo de chips estilo Wispr Flow (feedback de Eduardo, con capturas):
+# cada tecla del atajo es su PROPIO chip (⌃ ⇧ M, tres chips) dentro de un
+# campo blanco con un lápiz ✎ al final. El lápiz ES la afordancia de editar
+# — "Change" como texto suelto no se identificaba como acción. El click de
+# verdad lo sigue recibiendo el botón invisible de toda la fila.
+_CHIP_FONT_PT = 12.5
+_CHIP_PESO = 0.3
+_CHIP_H = 22
+_CHIP_PAD = 7        # aire horizontal dentro de cada chip
+_CHIP_GAP = 4        # hueco entre chips
+_FIELD_PAD = 8       # aire interior del campo, a ambos lados
+_FIELD_H = 32
+_PENCIL_TXT = "✎"
+_PENCIL_W = 16
+_FIELD_MIN_W = 110
+# Placeholder del campo durante la captura, hasta que cae la primera tecla
+# (el análogo del "Click to add a shortcut" de Wispr). Cabe de sobra: el
+# campo mide _FIELD_MIN_W como poco y la frase ~62pt a 11pt.
+_FIELD_HINT = "Press keys…"
 
-
-def _keycap_ancho(text: str, font) -> float:
-    """Ancho que necesita el keycap para no recortar `text` con `font`,
-    medido de verdad con AppKit (theme.text_width) -Task 10, Defecto 2
-    (fix2): con cycle_mode en cinco teclas (⌃⌥⇧⌘Q) el glifo mide más que los
-    62pt de _KEYCAP_W, y la etiqueta interna de theme.keycap() iba centrada,
-    así que un NSTextField centrado y justo de ancho recortaba la Q sin que
-    stringValue() se enterase -la misma familia de bug que _lado_ancho() y
-    _nota_huerfana_ancho() ya corrigen más arriba en este módulo.
-
-    _KEYCAP_W pasa a ser un SUELO, no un techo: para los combos cortos de
-    siempre (⌘, esc) el máximo de las dos cantidades sigue siendo _KEYCAP_W y
-    el keycap no cambia de tamaño -las filas no bailan-, pero un combo que
-    mida de verdad más que eso ensancha SOLO su propia fila. A diferencia de
-    _lado_ancho() (un valor compartido por las cuatro filas porque side_hint
-    solo puede devolver uno de cuatro textos ya conocidos, sea cual sea la
-    fila), aquí no hay un enum cerrado de combos posibles que medir de
-    antemano para las cuatro a la vez: cada fila mide SU PROPIO contenido, y
-    _build_row() reserva la columna del lado antes que la del keycap
-    (lado_x, calculada con lado_w) precisamente para que un keycap más ancho
-    en una fila no le quite sitio a la etiqueta de lado de esa misma fila."""
-    return max(_KEYCAP_W, math.ceil(theme.text_width(text, font)) + _KEYCAP_HOLGURA)
+# El "Reset to default" de Wispr (sale en las tres capturas del feedback):
+# vuelve los cuatro atajos a fábrica en un click.
+_RESET_TXT = "Reset to defaults"
 
 
-# Leyenda del keycap mientras se captura. NO es "Press keys…": a 14pt (el
-# font del keycap) esa frase mide 84pt de ancho de verdad (theme.text_width)
-# y el keycap solo tiene 62pt — se recortaría en silencio, el mismo defecto
-# que _lado_ancho() ya evita más abajo. La instrucción completa ya está
-# siempre visible en la cabecera de la ventana ("Click a shortcut, then
-# press the keys you want to use."); aquí basta un indicador corto de "estoy
-# escuchando" que quepa de verdad en el keycap.
-_CAPTURANDO_TXT = "…"
+def chip_texts(names: list[str]) -> list[str]:
+    """['ctrl','shift','m'] → ['⌃','⇧','M']: un chip por tecla, estilo Wispr.
+
+    Pasa por key_label tecla a tecla para que el chip y la leyenda del
+    teclado visual no puedan escribir la misma tecla de dos formas."""
+    return [key_label([n]) for n in (names or [])]
+
+
+def _chip_ancho(texto: str, font) -> float:
+    """Ancho de un chip: su texto medido de verdad (theme.text_width, la
+    lección de _lado_ancho) con aire a ambos lados, y nunca más estrecho que
+    alto — un chip de una letra se dibuja cuadrado, no como una astilla."""
+    return max(math.ceil(theme.text_width(texto, font)) + 2 * _CHIP_PAD, _CHIP_H)
+
+
+def _chips_ancho(textos: list[str], font) -> float:
+    if not textos:
+        return 0.0
+    return sum(_chip_ancho(t, font) for t in textos) + _CHIP_GAP * (len(textos) - 1)
+
+
+def field_width(estado: dict, font) -> float:
+    """Ancho ÚNICO del campo de chips, compartido por las cuatro filas (la
+    misma decisión que lado_w): el máximo que pide cualquier binding actual
+    más el lápiz, con _FIELD_MIN_W de suelo. Compartirlo deja la columna
+    alineada — cuatro campos de anchos distintos se leerían escalonados."""
+    necesita = max(
+        (_chips_ancho(chip_texts(list((fila or {}).get("keys") or [])), font)
+         for fila in estado.values()),
+        default=0.0,
+    )
+    return max(_FIELD_MIN_W, necesita + 2 * _FIELD_PAD + _PENCIL_W + _CHIP_GAP)
 
 # Alto extra que gana la fila de Dictation para el slíder de delay (ver
 # _build_row): el contenido de siempre (título, subtítulo, keycap, lado) se
@@ -328,9 +341,7 @@ def delay_for(names: list[str], anterior_ms: int) -> int:
     eligió el ⌘ derecho le cambiaría el tacto de la app sin pedirlo, y bajarle
     un 600 puesto a mano le pisaría su elección.
     """
-    from . import keys as _keys
-
-    if names and _keys.needs_guard(names[0]) and anterior_ms <= 0:
+    if names and keys.needs_guard(names[0]) and anterior_ms <= 0:
         return shortcuts.DEFAULT_DELAY_MS
     return anterior_ms
 
@@ -438,13 +449,19 @@ class ShortcutsController(NSObject):
         self._estado = {sid: dict(fila) for sid, fila in estado.items()}
         self._on_change = on_change
         self._rows = {}          # sid → NSView de la fila
-        self._keycaps = {}       # sid → NSView del keycap (theme.keycap)
-        self._keycap_labels = {}  # sid → NSTextField interno del keycap (su texto)
+        self._fields = {}        # sid → NSView del campo de chips (estilo Wispr)
+        self._chips = {}         # sid → [NSView]: un chip por tecla del binding
+        self._pencils = {}       # sid → NSTextField del lápiz ✎ del campo
+        self._hints = {}         # sid → NSTextField placeholder ("Press keys…")
         self._sides = {}         # sid → NSTextField del lado
         self._fila_boton = {}    # sid → NSButton invisible que arma la captura
         self._teclado_marco = None  # NSView del fondo del teclado (tests de geometría)
         self._nota_huerfana = None  # NSTextField de la fila huérfana, si la hay
         self._capturing = None    # sid en captura, o None
+        self._capture_pressed = []  # teclas ya pulsadas en la captura en curso
+        self._chip_font = theme.sf(_CHIP_FONT_PT, _CHIP_PESO)
+        self._field_w = 0.0       # ancho compartido del campo (field_width)
+        self._reset_boton = None  # NSButton "Reset to defaults"
         self._error_text = ""
         self._error = None        # NSTextField del mensaje de error de la fila
         self._slider = None       # NSSlider del delay de Dictation
@@ -494,6 +511,8 @@ class ShortcutsController(NSObject):
 
         lado_font = theme.mono(9.5)
         lado_w = _lado_ancho(lado_font)   # una sola vez: mismo ancho en las 4 filas
+        # Ancho del campo de chips, también compartido por las cuatro filas.
+        self._field_w = field_width(self._estado, self._chip_font)
 
         self._keys = {}          # nombre → NSView de la casilla
         self._legends = {}       # nombre → NSTextField con la leyenda de la casilla
@@ -535,16 +554,53 @@ class ShortcutsController(NSObject):
         # se toca: al crecer el alto, el campo gana espacio hacia ABAJO
         # -hacia el borde de la ventana, donde no hay nada más-, nunca
         # hacia arriba, donde vive la última fila de atajos.
+        # El botón de Reset ocupa la esquina inferior derecha; el campo de
+        # error cede exactamente ese ancho (sigue dando a dos líneas y el
+        # test del peor caso vigila que el texto más largo quepa igual).
+        reset_font = theme.sf(11.5)
+        reset_w = math.ceil(theme.text_width(_RESET_TXT, reset_font)) + 26
         error_font = theme.sf(11.5)
         error_h = _alto_multilinea(error_font, 2)
         self._error = theme.label(
-            NSMakeRect(PAD, y_(H - 46, error_h), W - PAD * 2, error_h),
+            NSMakeRect(PAD, y_(H - 46, error_h), W - PAD * 2 - reset_w - 12, error_h),
             "", error_font, theme.TEAL_DARK, multiline=True)
         content.addSubview_(self._error)
+
+        # Píldora dibujada a mano + botón invisible encima, el mismo patrón
+        # que las filas: en este macOS el bezel nativo de NSButton no compone
+        # (verificado con screencapture: el título quedaba flotando sin caja,
+        # ilegible sobre el papel — la misma familia de fallo que la pista
+        # del NSSlider más arriba).
+        pill = NSView.alloc().initWithFrame_(
+            NSMakeRect(W - PAD - reset_w, y_(H - 42, 26), reset_w, 26))
+        pill.setWantsLayer_(True)
+        pill.layer().setBackgroundColor_(theme.KEYCAP_BG.CGColor())
+        pill.layer().setCornerRadius_(13.0)
+        pill.layer().setBorderWidth_(1.0)
+        pill.layer().setBorderColor_(theme.BTN_BORDER.CGColor())
+        pill.addSubview_(theme.label(
+            NSMakeRect(0, (26 - 15) / 2, reset_w, 15), _RESET_TXT, reset_font,
+            theme.INK_SOFT, align=NSTextAlignmentCenter))
+        boton_reset = NSButton.alloc().initWithFrame_(
+            NSMakeRect(0, 0, reset_w, 26))
+        boton_reset.setBordered_(False)
+        boton_reset.setBezelStyle_(0)
+        boton_reset.setTitle_("")
+        boton_reset.setTarget_(self)
+        boton_reset.setAction_("resetDefaults:")
+        pill.addSubview_(boton_reset)
+        content.addSubview_(pill)
+        self._reset_boton = boton_reset
 
     def _build_row(self, sid, frame, lado_font, lado_w):
         sc = shortcuts.SHORTCUTS[sid]
         row = NSView.alloc().initWithFrame_(frame)
+        # Capa propia para poder resaltar la fila ENTERA durante la captura
+        # (feedback: no se veía en qué fila estabas). En reposo pinta el
+        # mismo papel que la ventana, así que no se nota que existe.
+        row.setWantsLayer_(True)
+        row.layer().setCornerRadius_(8.0)
+        row.layer().setBackgroundColor_(theme.PAGE_BG.CGColor())
         rw = frame.size.width
 
         # Solo Dictation desplaza su contenido: el resto de filas mide
@@ -557,50 +613,57 @@ class ShortcutsController(NSObject):
 
         nombres = list(self._estado.get(sid, {}).get("keys") or [])
 
-        # Zona derecha de la fila, de DERECHA a IZQUIERDA: [✎ Change] [lado]
-        # [keycap]. Reservar el Change antes que nada fija cap_x para que el
-        # título/subtítulo sepan hasta dónde llegar sin pisar el keycap.
-        change_x = rw - _LADO_MARGEN_D - _CHANGE_W
-        lado_x = change_x - _LADO_GAP - lado_w
-        keycap_font = theme.sf(14, 0.3)
-        texto_keycap = key_label(nombres)
-        keycap_w = _keycap_ancho(texto_keycap, keycap_font)
-        cap_x = lado_x - _LADO_GAP - keycap_w
-        # Título/subtítulo: hasta el keycap con holgura. Antes era rw-150 fijo,
-        # pero al añadir la columna Change el keycap se desplaza a la izquierda
-        # y ese ancho fijo lo pisaría. Dinámico = nunca se solapan.
-        titulo_w = max(80, cap_x - 8)
+        # Zona derecha de la fila, de DERECHA a IZQUIERDA: [campo de chips]
+        # [lado]. El campo (ancho único self._field_w, ver field_width) lleva
+        # dentro un chip por tecla y el lápiz ✎ — la afordancia de editar,
+        # estilo Wispr. El click de verdad lo recibe el botón invisible de
+        # toda la fila, más abajo.
+        field_x = rw - _LADO_MARGEN_D - self._field_w
+        lado_x = field_x - _LADO_GAP - lado_w
+        # Título/subtítulo: hasta la etiqueta de lado con holgura. Dinámico =
+        # nunca se solapan aunque el campo crezca con un combo largo.
+        titulo_w = max(80, lado_x - 8)
 
         row.addSubview_(theme.label(
             NSMakeRect(0, 24 + dy, titulo_w, 17), sc.label, theme.sf(13.5, 0.3), theme.INK))
         row.addSubview_(theme.label(
             NSMakeRect(0, 6 + dy, titulo_w, 16), sc.subtitle, theme.sf(11.5), theme.INK_MUTED))
 
-        cap = theme.keycap(NSMakeRect(cap_x, 12 + dy, keycap_w, _KEYCAP_H),
-                           texto_keycap, keycap_font, 7)
-        row.addSubview_(cap)
-        self._keycaps[sid] = cap
-        # theme.keycap() devuelve el CONTENEDOR (el propio keycap dibujado,
-        # con su capa/borde), no el NSTextField del glifo — ese vive como su
-        # única subvista. _refresh_row necesita escribir el TEXTO durante la
-        # captura, así que guarda también una referencia directa a esa
-        # subvista en vez de intentar setStringValue_ sobre el contenedor
-        # (que no lo tiene y revienta con AttributeError).
-        self._keycap_labels[sid] = cap.subviews()[0]
+        campo = NSView.alloc().initWithFrame_(
+            NSMakeRect(field_x, (ROW_H - _FIELD_H) / 2 + dy, self._field_w, _FIELD_H))
+        campo.setWantsLayer_(True)
+        campo.layer().setBackgroundColor_(theme.KEYCAP_BG.CGColor())
+        campo.layer().setCornerRadius_(8.0)
+        campo.layer().setBorderWidth_(1.0)
+        campo.layer().setBorderColor_(theme.BTN_BORDER.CGColor())
+        # Una captura con muchas teclas no puede desbordar el campo y pisar
+        # el borde de la ventana: se recorta dentro.
+        campo.layer().setMasksToBounds_(True)
+        row.addSubview_(campo)
+        self._fields[sid] = campo
+
+        lapiz = theme.label(
+            NSMakeRect(self._field_w - _FIELD_PAD - _PENCIL_W, (_FIELD_H - 16) / 2,
+                       _PENCIL_W, 16),
+            _PENCIL_TXT, theme.sf(12), theme.INK_MUTED)
+        campo.addSubview_(lapiz)
+        self._pencils[sid] = lapiz
+
+        hint = theme.label(
+            NSMakeRect(_FIELD_PAD, (_FIELD_H - 15) / 2,
+                       self._field_w - 2 * _FIELD_PAD - _PENCIL_W, 15),
+            _FIELD_HINT, theme.sf(11), theme.INK_MUTED)
+        hint.setHidden_(True)
+        campo.addSubview_(hint)
+        self._hints[sid] = hint
+
+        self._rebuild_chips(sid)
 
         lado = theme.label(NSMakeRect(lado_x, 17 + dy, lado_w, _LADO_ALTO),
                            side_label(sid, nombres),
                            lado_font, theme.INK_MUTED)
         row.addSubview_(lado)
         self._sides[sid] = lado
-
-        # Pista visible de "clica para cambiar": el botón invisible de toda
-        # la fila (más abajo) recibe el click de verdad, este label solo
-        # comunica DÓNDE. Teal para que se lea como acción, no como texto.
-        row.addSubview_(theme.label(
-            NSMakeRect(change_x, 15 + dy, _CHANGE_W, _CHANGE_H),
-            _CHANGE_TXT, theme.sf(11.5, 0.25), theme.TEAL,
-            align=NSTextAlignmentCenter))
 
         # Toda la fila arma la captura al pulsarla (Task 10: "clicking a row
         # starts key capture"), no solo el keycap — un botón invisible del
@@ -875,26 +938,38 @@ class ShortcutsController(NSObject):
                     leyenda.setTextColor_(theme.INK_KEYCAP)
 
     def _paint_keyboard_captura(self, sid):
-        """Verde = usable para este atajo; gris = no (feedback de POMI).
+        """Verde DE VERDAD = usable para este atajo; gris = no.
 
         La verdad la pone shortcuts.validate — el mismo validador que luego
         acepta o rechaza la captura, así que el color y el resultado no pueden
-        contarse historias distintas: una tecla que validate aceptaría como
-        atajo de UNA tecla se enciende en el teal claro de la marca (el
-        "verde"), y el resto se apaga con la leyenda en gris — letras,
-        reservadas (esc/shift), teclas de otros atajos y las decorativas
-        (⇪, fn, flechas). Los combos (ctrl+shift+m) se siguen capturando
-        aunque sus letras salgan grises: el color habla de la tecla SOLA.
+        contarse historias distintas. El primer intento pintaba las usables
+        con MODEL_BTN_BG (#EDF5F3), que en pantalla no se distingue del gris
+        de una apagada — Eduardo lo describió como "el teclado se ve completo
+        y las que se pueden no están marcadas". El contraste ES el arreglo:
+        las usables se encienden en el teal SÓLIDO de la marca con la leyenda
+        en color papel; las teclas ya PULSADAS de esta captura suben a
+        TEAL_DARK (feedback en vivo: lo que marcas se refleja aquí); y el
+        resto se apaga con la leyenda en gris tenue — letras, reservadas
+        (esc/shift), teclas de otros atajos y las decorativas (⇪, flechas).
+        Los combos (ctrl+shift+m) se siguen capturando aunque sus letras
+        salgan grises: el color habla de la tecla SOLA.
         DEBE correr en el hilo principal, como _paint_keyboard.
         """
+        pulsadas = {keys.canon(n) or n for n in self._capture_pressed}
         for nombre, casilla in self._keys.items():
             leyenda = self._legends.get(nombre)
-            if shortcuts.validate(sid, [nombre], self._estado)[0]:
-                casilla.layer().setBackgroundColor_(theme.MODEL_BTN_BG.CGColor())
+            if nombre in pulsadas:
+                casilla.layer().setBackgroundColor_(theme.TEAL_DARK.CGColor())
                 casilla.layer().setBorderWidth_(1.0)
-                casilla.layer().setBorderColor_(theme.MODEL_BTN_BORDER.CGColor())
+                casilla.layer().setBorderColor_(theme.TEAL_DARK.CGColor())
                 if leyenda is not None:
-                    leyenda.setTextColor_(theme.INK_KEYCAP)
+                    leyenda.setTextColor_(theme.PAGE_BG)
+            elif shortcuts.validate(sid, [nombre], self._estado)[0]:
+                casilla.layer().setBackgroundColor_(theme.TEAL.CGColor())
+                casilla.layer().setBorderWidth_(1.0)
+                casilla.layer().setBorderColor_(theme.TEAL_DARK.CGColor())
+                if leyenda is not None:
+                    leyenda.setTextColor_(theme.PAGE_BG)
             else:
                 _apagar(casilla)
                 if leyenda is not None:
@@ -929,6 +1004,7 @@ class ShortcutsController(NSObject):
         """
         anterior = self._capturing
         self._capturing = sid
+        self._capture_pressed = []
         # Guía clara mientras captura (punto 5 del feedback): el keycap pone
         # "…" y poco más orientaba; ahora el campo de estado dice qué hacer y
         # que Esc deja el atajo como estaba. Se limpia al terminar la captura.
@@ -954,6 +1030,7 @@ class ShortcutsController(NSObject):
         """Esc durante la captura: deja el atajo como estaba (convención de
         macOS). También lo llama el cierre de la ventana."""
         sid, self._capturing = self._capturing, None
+        self._capture_pressed = []
         self._error_text = ""
         if self._hotkey is not None:
             self._hotkey.end_capture()
@@ -988,10 +1065,14 @@ class ShortcutsController(NSObject):
         sid = self._capturing
         if not sid:
             return
+        # Lo pulsado hasta ahora se refleja en vivo: chips en el campo de la
+        # fila y casillas en TEAL_DARK en el teclado, pase o no la validación.
+        self._capture_pressed = list(names)
         ok, msg = shortcuts.validate(sid, list(names), self._estado)
         if not ok:
             self._error_text = msg
             self._refresh_row(sid)
+            self._paint_keyboard()
             return
 
         fila = dict(self._estado.get(sid, {}))
@@ -1009,10 +1090,12 @@ class ShortcutsController(NSObject):
 
         self._estado[sid] = fila
         self._capturing = None
-        self._error_text = aviso or msg    # msg puede traer el aviso de F5
+        self._capture_pressed = []
+        self._error_text = aviso or msg    # msg puede traer el aviso de F5 o fn
         if self._hotkey is not None:
             self._hotkey.end_capture()
         self._refresh_row(sid)
+        self._layout_fields()   # un combo más largo (o más corto) recoloca la columna
         self._paint_keyboard()
         if fila.get("delay_ms") is not None and self._slider is not None and sid == "dictation":
             self._slider.setDoubleValue_(float(fila["delay_ms"]))
@@ -1048,8 +1131,106 @@ class ShortcutsController(NSObject):
         if self._delay_valor is not None:
             self._delay_valor.setStringValue_(_fmt_delay(ms))
 
+    def _rebuild_chips(self, sid, nombres=None):
+        """Rehace los chips del campo de `sid`: con `nombres` None pinta el
+        binding del estado; con lista (la captura en vivo) pinta esa.
+
+        A diferencia de las casillas del teclado, los chips sí se recrean en
+        cada repintado: su NÚMERO cambia con el binding. Solo se tocan los de
+        la fila afectada, así que no hay parpadeo que temer.
+        """
+        campo = self._fields.get(sid)
+        if campo is None:
+            return
+        for chip in self._chips.get(sid, ()):
+            chip.removeFromSuperview()
+        if nombres is None:
+            nombres = list(self._estado.get(sid, {}).get("keys") or [])
+        textos = chip_texts(nombres)
+        chips = []
+        x = _FIELD_PAD
+        cy = (_FIELD_H - _CHIP_H) / 2
+        for t in textos:
+            chip = theme.keycap(
+                NSMakeRect(x, cy, _chip_ancho(t, self._chip_font), _CHIP_H),
+                t, self._chip_font, 5)
+            campo.addSubview_(chip)
+            chips.append(chip)
+            x += _chip_ancho(t, self._chip_font) + _CHIP_GAP
+        self._chips[sid] = chips
+        hint = self._hints.get(sid)
+        if hint is not None:
+            # El placeholder solo durante la captura y hasta la primera tecla.
+            hint.setHidden_(bool(textos) or self._capturing != sid)
+
+    def _layout_fields(self):
+        """Recoloca los cuatro campos cuando cambia el ancho compartido (un
+        combo nuevo más largo, o un reset que lo encoge). La etiqueta de lado
+        se mueve con ellos: la columna entera viaja junta, como en _build_row.
+        """
+        nuevo = field_width(self._estado, self._chip_font)
+        if nuevo == self._field_w:
+            return
+        self._field_w = nuevo
+        for sid, campo in self._fields.items():
+            rw = self._rows[sid].frame().size.width
+            fr = campo.frame()
+            campo.setFrame_(NSMakeRect(
+                rw - _LADO_MARGEN_D - nuevo, fr.origin.y, nuevo, fr.size.height))
+            lapiz = self._pencils.get(sid)
+            if lapiz is not None:
+                lf = lapiz.frame()
+                lapiz.setFrame_(NSMakeRect(
+                    nuevo - _FIELD_PAD - _PENCIL_W, lf.origin.y,
+                    lf.size.width, lf.size.height))
+            hint = self._hints.get(sid)
+            if hint is not None:
+                hf = hint.frame()
+                hint.setFrame_(NSMakeRect(
+                    hf.origin.x, hf.origin.y,
+                    nuevo - 2 * _FIELD_PAD - _PENCIL_W, hf.size.height))
+            lado = self._sides.get(sid)
+            if lado is not None:
+                sfr = lado.frame()
+                lado.setFrame_(NSMakeRect(
+                    rw - _LADO_MARGEN_D - nuevo - _LADO_GAP - sfr.size.width,
+                    sfr.origin.y, sfr.size.width, sfr.size.height))
+            self._rebuild_chips(sid)
+
+    def resetDefaults_(self, _sender):
+        """Vuelve los cuatro atajos a fábrica (el "Reset to default" de
+        Wispr, pedido expreso de Eduardo). Cada vuelta pasa por _on_change
+        igual que una captura: si el hotkey real rechaza alguna (colisión
+        transitoria con un binding raro), esa fila se queda como está y el
+        campo de error lo cuenta — un segundo click la suele resolver, con
+        el resto ya en fábrica."""
+        if self._capturing:
+            self.cancel_capture_()
+        avisos = []
+        for sid, sc in shortcuts.SHORTCUTS.items():
+            fila = dict(self._estado.get(sid, {}))
+            fila["keys"] = list(sc.default)
+            if sc.has_delay:
+                fila["delay_ms"] = delay_for(list(sc.default), 0)
+                if fila.get("style") not in keys.MODES:
+                    fila["style"] = shortcuts.DEFAULT_STYLE
+            aplicado, aviso = self._on_change(sid, fila)
+            if not aplicado:
+                avisos.append(aviso)
+                continue
+            self._estado[sid] = fila
+        self._error_text = avisos[0] if avisos else ""
+        for sid in shortcuts.SHORTCUTS:
+            self._refresh_row(sid)
+        self._layout_fields()
+        self._paint_keyboard()
+        if self._slider is not None:
+            ms = int(self._estado.get("dictation", {}).get("delay_ms") or 0)
+            self._slider.setDoubleValue_(float(ms))
+            self._actualizar_valor_delay(ms)
+
     def _refresh_row(self, sid):
-        """Repinta el keycap, el lado y el mensaje de una fila.
+        """Repinta una fila entera: resaltado, campo de chips, lado y mensaje.
 
         DEBE correr en el hilo principal: apply_capture_ lo llama desde el
         callback de captura, que llega por el hilo del listener de pynput.
@@ -1057,13 +1238,18 @@ class ShortcutsController(NSObject):
         """
         nombres = list(self._estado.get(sid, {}).get("keys") or [])
         capturando = self._capturing == sid
-        cap = self._keycaps.get(sid)
-        etiqueta = self._keycap_labels.get(sid)
-        if etiqueta is not None:
-            etiqueta.setStringValue_(_CAPTURANDO_TXT if capturando else key_label(nombres))
-        if cap is not None:
-            cap.layer().setBorderColor_(
-                (theme.TEAL if capturando else theme.KEYCAP_EDGE).CGColor())
+        fila = self._rows.get(sid)
+        if fila is not None and fila.layer() is not None:
+            # La fila en captura se resalta ENTERA — antes solo cambiaba el
+            # borde del keycap y no se veía dónde estabas.
+            fila.layer().setBackgroundColor_(
+                (theme.MODEL_BTN_BG if capturando else theme.PAGE_BG).CGColor())
+        campo = self._fields.get(sid)
+        if campo is not None:
+            campo.layer().setBorderColor_(
+                (theme.TEAL if capturando else theme.BTN_BORDER).CGColor())
+            campo.layer().setBorderWidth_(2.0 if capturando else 1.0)
+        self._rebuild_chips(sid, self._capture_pressed if capturando else None)
         lado = self._sides.get(sid)
         if lado is not None:
             lado.setStringValue_(side_label(sid, nombres))

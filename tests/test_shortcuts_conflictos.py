@@ -88,3 +88,25 @@ def test_avisa_de_f5_sin_bloquear():
     ok, msg = shortcuts.validate("dictation", ["f5"], ACTUALES)
     assert ok
     assert "F5" in msg or "f5" in msg
+
+
+def test_un_modificador_izquierdo_capturado_se_acepta_con_su_aviso():
+    # Desde la captura, "cmd" SIN lado es la tecla izquierda física (pynput
+    # colapsa cmd_l→cmd). validate_custom la rechaza porque su público es
+    # texto tecleado (config.yaml), pero rechazarla aquí dejaría el ⌘
+    # izquierdo —que DICTATION_KEYS ofrece con su delay— sin camino posible
+    # en la ventana: se veía gris en el teclado y la captura fallaba.
+    for n in ("cmd", "alt", "ctrl"):
+        ok, msg = shortcuts.validate("dictation", [n], ACTUALES)
+        assert ok, n
+        assert "delay" in msg.lower(), "el aviso explica el arranque con retardo"
+
+
+def test_elegir_fn_aconseja_apagar_la_tecla_globo_sin_bloquear():
+    # macOS también reacciona a fn/🌐 (emoji, cambio de idioma…) según lo que
+    # haya en Ajustes del Sistema. Elegirla es legítimo — Wispr la trae de
+    # fábrica —, así que se aconseja apagar la acción del sistema, no se
+    # bloquea.
+    ok, msg = shortcuts.validate("dictation", ["fn"], ACTUALES)
+    assert ok
+    assert "🌐" in msg or "fn" in msg.lower()

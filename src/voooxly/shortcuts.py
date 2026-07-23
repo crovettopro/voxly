@@ -292,11 +292,31 @@ def validate(sid: str, names: list[str], actuales: dict[str, dict]) -> tuple[boo
         return True, ""
 
     if len(names) == 1:
+        canon1 = keys.canon(names[0])
+        if canon1 in ("cmd", "alt", "ctrl"):
+            # Capturado del teclado, el nombre sin lado ES la tecla izquierda
+            # (pynput colapsa cmd_l→cmd): validate_custom lo rechaza porque
+            # su público es texto TECLEADO en config.yaml, donde "cmd" es una
+            # intención ambigua que hay que devolver a su autor. Aquí no hay
+            # ambigüedad — la tecla ya se pulsó — y rechazarla dejaría el ⌘
+            # izquierdo, que DICTATION_KEYS ofrece con su delay, sin ningún
+            # camino posible en la ventana.
+            if sid == "dictation":
+                return True, ("Left modifier: dictation starts after the "
+                              "delay below, so combos like ⌘C keep working.")
+            return True, ""
         ok, msg = keys.validate_custom(names[0])
         if not ok:
             return False, msg
 
-    if "f5" in {n.lower() for n in names}:
+    bajos = {n.lower() for n in names}
+    if "f5" in bajos:
         msg = "Heads up: F5 is the macOS Dictation key, so macOS may react to it too."
+        return True, msg
+    if "fn" in bajos:
+        # La elección de fábrica de Wispr Flow; macOS también la escucha
+        # (emoji, cambio de idioma…), así que se aconseja sin bloquear.
+        msg = ("Tip: set “Press 🌐 key to” to “Do Nothing” in System Settings → "
+               "Keyboard so macOS doesn't react to it too.")
         return True, msg
     return True, ""

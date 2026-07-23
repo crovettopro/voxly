@@ -403,7 +403,10 @@ def _controller(estado=None):
 
 def test_durante_la_captura_las_letras_se_apagan_y_las_usables_se_encienden():
     """Capturando Dictation: una letra inutilizaría el teclado entero
-    (validate la rechaza) → gris; una F o un modificador con lado → verde.
+    (validate la rechaza) → gris; una F o un modificador con lado → teal
+    SÓLIDO con leyenda en papel. El teal claro de la primera versión
+    (MODEL_BTN_BG) no se distinguía del gris en pantalla — "el teclado se ve
+    completo", dijo Eduardo — así que el contraste es parte del contrato.
     La verdad la pone shortcuts.validate, el MISMO validador que luego acepta
     o rechaza la captura — el color no puede prometer lo que validate negará."""
     c = _controller()
@@ -412,18 +415,42 @@ def test_durante_la_captura_las_letras_se_apagan_y_las_usables_se_encienden():
     assert c._legends["a"].textColor().isEqual_(theme.INK_MUTED)     # letra: no
     assert c._legends["esc"].textColor().isEqual_(theme.INK_MUTED)   # dueña de cancel
     assert c._legends["shift"].textColor().isEqual_(theme.INK_MUTED) # dueña de latch
-    assert c._legends["f13"].textColor().isEqual_(theme.INK_KEYCAP)  # usable
-    assert c._legends["cmd_r"].textColor().isEqual_(theme.INK_KEYCAP)  # la suya: usable
+    assert c._legends["f13"].textColor().isEqual_(theme.PAGE_BG)     # usable: encendida
+    assert c._legends["cmd_r"].textColor().isEqual_(theme.PAGE_BG)   # la suya: usable
     c.close()
 
 
 def test_las_decorativas_nunca_se_encienden_en_captura():
-    """⇪, fn y el bloque de flechas tienen leyenda pero no son asignables:
-    en captura salen en gris, no como promesa de tecla elegible."""
+    """⇪ y el bloque de flechas tienen leyenda pero no son asignables: en
+    captura salen en gris, no como promesa de tecla elegible. fn ya NO está
+    aquí: desde que hotkey.py la endereza es una tecla de dictado de pleno
+    derecho (ver el test siguiente)."""
     c = _controller()
     c.begin_capture_("dictation")
-    for nombre in ("caps_lock", "fn", "arrows", ";", ","):
+    for nombre in ("caps_lock", "arrows", ";", ","):
         assert c._legends[nombre].textColor().isEqual_(theme.INK_MUTED), nombre
+    c.close()
+
+
+def test_fn_se_enciende_capturando_dictation():
+    """La tecla estrella de Wispr Flow, pedida expresamente ("es vital tener
+    también fn"): capturando Dictation tiene que ofrecerse en verde."""
+    c = _controller()
+    c.begin_capture_("dictation")
+    assert c._legends["fn"].textColor().isEqual_(theme.PAGE_BG)
+    c.close()
+
+
+def test_los_modificadores_izquierdos_se_encienden_capturando_dictation():
+    """El ⌘/⌥/⌃ izquierdos son teclas de dictado legítimas (DICTATION_KEYS
+    las ofrece, con guarda): el teclado tiene que ofrecerlas en verde, no
+    dejarlas grises como si no existiera forma de elegirlas. shift no: sigue
+    reservada para latch."""
+    c = _controller()
+    c.begin_capture_("dictation")
+    for nombre in ("cmd", "alt", "ctrl"):
+        assert c._legends[nombre].textColor().isEqual_(theme.PAGE_BG), nombre
+    assert c._legends["shift"].textColor().isEqual_(theme.INK_MUTED)
     c.close()
 
 
@@ -432,7 +459,7 @@ def test_cada_atajo_tiene_sus_propias_usables():
     capturando Cancel (confirmar tu propia tecla nunca es conflicto)."""
     c = _controller()
     c.begin_capture_("cancel")
-    assert c._legends["esc"].textColor().isEqual_(theme.INK_KEYCAP)
+    assert c._legends["esc"].textColor().isEqual_(theme.PAGE_BG)
     assert c._legends["cmd_r"].textColor().isEqual_(theme.INK_MUTED)  # de Dictation
     c.close()
 
