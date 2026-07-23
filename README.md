@@ -117,7 +117,9 @@ The **AI engine** menu has five options, and switching is one click:
 
 They all do the job; pick whichever you already have an account with. Voooxly
 has no stake in which one you use and never sends anything anywhere except the
-provider you chose.
+provider you chose. When you connect a cloud provider, Voooxly lets you **pick
+the exact model** from a short curated list — the recommended default first,
+a lighter one if you want speed, a bigger one if you want the best writing.
 
 Two things worth knowing. **Groq is the only free one**, which is why it's
 first in the list and why the setup above uses it. And **Ollama is the only
@@ -169,6 +171,7 @@ which Whisper already punctuates well. You just do the cleanup yourself.
 | **Translate EN→ES / ES→EN** | Natural translation that keeps your register and tone |
 | **Code / spec** | An engineering spec: behavior, edge cases, backticked identifiers |
 | **Markdown notes** | A real Markdown note: `##` title, sections, checkboxes for to-dos |
+| **Command** | Say what you want written ("email Ana that the demo moved to Friday") — get the finished draft |
 | **Verbatim** | Exactly what you said — no LLM, no rewriting |
 
 Switch modes from the menu bar or with Ctrl+Shift+M. To make every mode follow
