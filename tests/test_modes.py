@@ -89,6 +89,28 @@ def test_literal_se_salta_el_llm():
     assert modes.system_prompt("literal", "en") == ""
 
 
+def test_comando_ejecuta_el_encargo_en_vez_de_transformarlo():
+    """El único modo que SÍ cumple la instrucción (Command Mode, idea de
+    Wispro): su base no puede llevar la regla anti-ejecución de los demás."""
+    p = _prompt("comando")
+    assert "DO fulfill the request" in p
+    assert "do NOT answer or execute it" not in p
+    assert "Write the text the instruction asks for" in p
+
+
+def test_comando_no_inventa_y_marca_los_huecos():
+    p = _prompt("comando")
+    assert "Never invent facts" in p
+    assert "[fill in: ...]" in p
+
+
+def test_comando_sin_encargo_cae_a_dictado_normal():
+    """Dictar contenido plano en Command no puede producir un texto inventado:
+    el prompt ordena tratarlo como dictado y limpiarlo."""
+    p = _prompt("comando")
+    assert "treat it as dictation" in p
+
+
 # --- Integridad del catálogo ---
 
 def test_todos_los_modos_tienen_label_y_hint():
@@ -107,6 +129,7 @@ def test_las_claves_de_modo_no_cambian():
         "traducir-es-en",
         "codigo",
         "notas",
+        "comando",
         "literal",
     }
 
@@ -120,7 +143,7 @@ def test_modo_desconocido_cae_en_ordenar():
 def test_flash_parts_muestra_nombre_posicion_y_hint():
     title, body = modes.flash_parts("prompt")
     assert "AI prompt" in title
-    assert "2/8" in title  # segundo modo del ciclo
+    assert "2/9" in title  # segundo modo del ciclo (9 modos desde Command)
     assert body == modes.MODES["prompt"]["hint"]
 
 

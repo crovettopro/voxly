@@ -42,6 +42,42 @@ def _base_rules(lang: str | None) -> str:
     )
 
 
+def _command_rules(lang: str | None) -> str:
+    """Reglas base del modo Command: aquí la instrucción SÍ se ejecuta.
+
+    _base_rules prohíbe actuar sobre lo dictado — la regla que salva a los
+    demás modos de contestar una pregunta dictada. Command existe justo para
+    lo contrario (idea rescatada del Command Mode de Wispro, PH 2026-07-23):
+    el usuario dicta un ENCARGO de escritura y quiere el texto terminado, no
+    el encargo pulido. Por eso este modo no comparte base con el resto.
+    """
+    if lang:
+        lang_rule = (
+            f"- Write the output in {lang} unless the instruction explicitly "
+            "asks for another language."
+        )
+    else:
+        lang_rule = (
+            "- Write the output in the language the instruction implies: a "
+            "Spanish instruction asking for an English email means English "
+            "output. Otherwise, keep the language the user spoke."
+        )
+    return (
+        "You are a voice-command writer. You receive one spoken instruction "
+        "describing text the user wants written — an email, a reply, a post, "
+        "a draft. Here you DO fulfill the request: produce the finished text, "
+        "ready to paste and send.\n"
+        "Non-negotiable rules:\n"
+        "- Return ONLY the requested text: no preamble, no explanations, no "
+        "quotes around the result, no code fences wrapping the whole answer.\n"
+        "- Use every fact, name and detail the user gave. Never invent facts "
+        "they did not say; leave [fill in: ...] where a needed detail is "
+        "missing.\n"
+        "- Match the length and tone the instruction implies; when in doubt, "
+        "short and natural.\n" + lang_rule
+    )
+
+
 # Los labels/hints (UI) van en inglés; la SALIDA conserva el idioma hablado
 # (o app.language si el usuario lo fija). Las claves no se tocan.
 # "fast_lane": True → dictados cortos (llm.fast_lane_words) se pegan sin LLM.
@@ -175,6 +211,23 @@ MODES: dict[str, dict] = {
             "- Output raw Markdown only — no code fences around it, no commentary."
         ),
     },
+    "comando": {
+        "label": "Command",
+        "hint": "Say what you want written — get the draft.",
+        "command": True,  # la instrucción se EJECUTA (ver _command_rules)
+        "system": (
+            "Write the text the instruction asks for.\n"
+            "- 'Write an email to Ana about X' -> the email itself; add a "
+            "subject line only if they asked for one.\n"
+            "- 'Reply saying Y' -> the ready-to-send reply.\n"
+            "- 'Draft a post/tweet about Z' -> the post, within the "
+            "platform's usual length.\n"
+            "- Meta-requests mixed into the instruction ('make it formal', "
+            "'two paragraphs') are constraints to obey, not content.\n"
+            "- If the dictation is NOT a writing instruction but plain "
+            "content, treat it as dictation: clean it up and return it."
+        ),
+    },
     "literal": {
         "label": "Verbatim",
         "hint": "Exactly what you said — no rewriting.",
@@ -187,7 +240,8 @@ def system_prompt(mode: str, lang: str | None = DEFAULT_LANG) -> str:
     spec = MODES.get(mode, MODES["ordenar"])
     if spec["system"] == "NONE":
         return ""
-    return _base_rules(lang) + "\n\n" + spec["system"]
+    base = _command_rules if spec.get("command") else _base_rules
+    return base(lang) + "\n\n" + spec["system"]
 
 
 def modes_by_key() -> dict[str, dict]:
