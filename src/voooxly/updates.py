@@ -23,7 +23,7 @@ log = logging.getLogger("voooxly.updates")
 # de producción es voooxly.com (proyecto "voooxly" de crovettopro).
 APPCAST_URL = "https://voooxly.com/appcast.json"
 # Fuera del .app (ejecutando desde el repo) no hay Info.plist del que leer.
-FALLBACK_VERSION = "1.5.0"
+FALLBACK_VERSION = "1.5.1"
 
 # Re-chequeo periódico: la app vuelve a consultar cada CHECK_INTERVAL segundos
 # mientras esté abierta (además del check al arranque). 24 h cubre a quien la
