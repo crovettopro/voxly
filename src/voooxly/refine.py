@@ -65,6 +65,38 @@ def detect_backend(cfg=None, force: bool = False) -> str:
     return _detected
 
 
+# Familias de OpenAI que SOLO aceptan la temperature por defecto: mandarles
+# otra es un 400 Bad Request seco (el fallo real con gpt-5-mini mientras
+# gpt-4.1-mini conectaba). Se casa por prefijo con separador ("-" o ".") para
+# que "gpt-5.6-luna" cuente y "gpt-4o" u "olmo-7b" no.
+_RAZONADORES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _es_razonador(model: str) -> bool:
+    m = (model or "").lower()
+    return any(
+        m == p or m.startswith(p + "-") or m.startswith(p + ".")
+        for p in _RAZONADORES
+    )
+
+
+def openai_payload(model: str, system: str, user: str, temp) -> dict:
+    """Cuerpo del POST /chat/completions. Función pura de módulo para que el
+    contrato quede clavado en tests: a los modelos razonadores se les omite
+    la temperature; el resto (gpt-4*, llama, gemini) la siguen recibiendo,
+    porque quitársela cambiaría su salida en silencio."""
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if not _es_razonador(model):
+        body["temperature"] = temp
+    return body
+
+
 def list_ollama_models(host: str, timeout: float = 3.0) -> list[str]:
     """Modelos que el Ollama del usuario dice tener. Nunca lanza.
 
@@ -254,7 +286,7 @@ class Refiner:
     # --- OpenAI-compatible ---
     def _openai(self, system: str, user: str) -> str:
         base = self.cfg.get("llm.openai.base_url", "https://api.openai.com/v1")
-        model = self.cfg.get("llm.openai.model", "gpt-5-mini")
+        model = self.cfg.get("llm.openai.model", "gpt-5.6-luna")
         env_key = self.cfg.get("llm.openai.api_key_env", "OPENAI_API_KEY")
         key = os.environ.get(env_key, "")
         temp = self.cfg.get("llm.openai.temperature", 0.3)
@@ -271,14 +303,7 @@ class Refiner:
             r = requests.post(
                 f"{base.rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": temp,
-                },
+                json=openai_payload(model, system, user, temp),
                 timeout=timeout,
             )
             r.raise_for_status()
